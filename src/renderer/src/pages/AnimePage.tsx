@@ -248,7 +248,7 @@ export default function AnimePage(): JSX.Element {
                           (episodeProgress.every((p) => p.completed) ? 1 : 0)
                         : 1
                     const ep = Math.min(nextEp, totalEpisodes)
-                    navigate(`/watch/${anime.id}/${ep}`)
+                    navigate(`/anime/watch/${anime.id}/${ep}`)
                   }}
                   className="btn-primary"
                 >
@@ -296,7 +296,7 @@ export default function AnimePage(): JSX.Element {
                 return (
                   <button
                     key={ep}
-                    onClick={() => navigate(`/watch/${anime.id}/${ep}`)}
+                    onClick={() => navigate(`/anime/watch/${anime.id}/${ep}`)}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       handleToggleEpisodeWatched(ep)
@@ -338,7 +338,7 @@ export default function AnimePage(): JSX.Element {
               {relatedAnime.map((rel) => (
                 <div
                   key={rel.node.id}
-                  onClick={() => navigate(`/anime/${rel.node.id}`)}
+                  onClick={() => navigate(`/anime/detail/${rel.node.id}`)}
                   className="shrink-0 cursor-pointer group"
                 >
                   <div className="w-28 aspect-[3/4] rounded-lg overflow-hidden">

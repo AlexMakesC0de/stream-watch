@@ -29,6 +29,25 @@ const api = {
   clearProviderCache: (anilistId: number) =>
     ipcRenderer.invoke('provider:clear-cache', anilistId),
 
+  // ── Media (Movies & TV) ────────────────────────
+  addMedia: (media: Record<string, unknown>) => ipcRenderer.invoke('db:add-media', media),
+  getMediaLibrary: (status?: string) => ipcRenderer.invoke('db:get-media-library', status),
+  getMedia: (tmdbId: number, mediaType: string) =>
+    ipcRenderer.invoke('db:get-media', tmdbId, mediaType),
+  updateMediaStatus: (tmdbId: number, mediaType: string, status: string) =>
+    ipcRenderer.invoke('db:update-media-status', tmdbId, mediaType, status),
+  removeMedia: (tmdbId: number, mediaType: string) =>
+    ipcRenderer.invoke('db:remove-media', tmdbId, mediaType),
+  saveMediaProgress: (progress: Record<string, unknown>) =>
+    ipcRenderer.invoke('db:save-media-progress', progress),
+  getMediaProgress: (tmdbId: number, mediaType: string) =>
+    ipcRenderer.invoke('db:get-media-progress', tmdbId, mediaType),
+  getMediaEpisodeProgress: (tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null) =>
+    ipcRenderer.invoke('db:get-media-episode-progress', tmdbId, mediaType, seasonNumber, episodeNumber),
+  getMediaContinueWatching: () => ipcRenderer.invoke('db:get-media-continue-watching'),
+  toggleMediaEpisodeCompleted: (tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null, completed: boolean) =>
+    ipcRenderer.invoke('db:toggle-media-episode-completed', tmdbId, mediaType, seasonNumber, episodeNumber, completed),
+
   // ── Window Controls ────────────────────────────
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
   maximizeWindow: () => ipcRenderer.send('window:maximize'),
@@ -40,6 +59,13 @@ const api = {
     return () => ipcRenderer.removeListener('window:maximized-changed', handler)
   },
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+
+
+  // ── Settings ───────────────────────────────────
+  getSetting: (key: string) => ipcRenderer.invoke('settings:get', key),
+  setSetting: (key: string, value: string) => ipcRenderer.invoke('settings:set', key, value),
+  getAllSettings: () => ipcRenderer.invoke('settings:get-all'),
+  resetSettings: () => ipcRenderer.invoke('settings:reset'),
 
   // ── Auto Updater ───────────────────────────────
   onUpdateAvailable: (callback: (version: string) => void) => {

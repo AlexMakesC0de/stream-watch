@@ -102,3 +102,141 @@ export interface AniListPage {
   }
   media: AniListAnime[]
 }
+
+// ─── TMDB API Types ───────────────────────────────────────────
+
+export type MediaType = 'movie' | 'tv'
+
+export interface TMDBMovie {
+  id: number
+  title: string
+  original_title: string
+  overview: string | null
+  poster_path: string | null
+  backdrop_path: string | null
+  release_date: string
+  vote_average: number
+  vote_count: number
+  genre_ids?: number[]
+  genres?: { id: number; name: string }[]
+  runtime: number | null
+  status: string
+  tagline: string | null
+  popularity: number
+  adult: boolean
+  media_type?: 'movie'
+  // from append_to_response
+  credits?: {
+    cast: TMDBCastMember[]
+  }
+  similar?: TMDBPage<TMDBMovie>
+  recommendations?: TMDBPage<TMDBMovie>
+  external_ids?: { imdb_id: string | null }
+}
+
+export interface TMDBTvShow {
+  id: number
+  name: string
+  original_name: string
+  overview: string | null
+  poster_path: string | null
+  backdrop_path: string | null
+  first_air_date: string
+  vote_average: number
+  vote_count: number
+  genre_ids?: number[]
+  genres?: { id: number; name: string }[]
+  number_of_seasons: number
+  number_of_episodes: number
+  status: string
+  tagline: string | null
+  popularity: number
+  media_type?: 'tv'
+  seasons?: TMDBSeason[]
+  // from append_to_response
+  credits?: {
+    cast: TMDBCastMember[]
+  }
+  similar?: TMDBPage<TMDBTvShow>
+  recommendations?: TMDBPage<TMDBTvShow>
+  external_ids?: { imdb_id: string | null }
+}
+
+export interface TMDBSeason {
+  id: number
+  season_number: number
+  name: string
+  overview: string | null
+  poster_path: string | null
+  air_date: string | null
+  episode_count: number
+  episodes?: TMDBEpisode[]
+}
+
+export interface TMDBEpisode {
+  id: number
+  episode_number: number
+  season_number: number
+  name: string
+  overview: string | null
+  still_path: string | null
+  air_date: string | null
+  runtime: number | null
+  vote_average: number
+}
+
+export interface TMDBCastMember {
+  id: number
+  name: string
+  character: string
+  profile_path: string | null
+  order: number
+}
+
+export interface TMDBPage<T> {
+  page: number
+  results: T[]
+  total_pages: number
+  total_results: number
+}
+
+export type TMDBMediaItem = (TMDBMovie & { media_type: 'movie' }) | (TMDBTvShow & { media_type: 'tv' })
+
+// ─── Local Media Types (Movies/TV) ───────────────────────────
+
+export interface LocalMedia {
+  id: number
+  tmdb_id: number
+  media_type: MediaType
+  title: string
+  poster_path: string | null
+  backdrop_path: string | null
+  overview: string | null
+  release_date: string | null
+  vote_average: number | null
+  genres: string | null
+  runtime: number | null
+  number_of_seasons: number | null
+  number_of_episodes: number | null
+  status: WatchStatus
+  added_at: string
+  updated_at: string
+}
+
+export interface MediaEpisodeProgress {
+  id: number
+  media_id: number
+  season_number: number | null
+  episode_number: number | null
+  watched_seconds: number
+  total_seconds: number
+  completed: number
+  watched_at: string
+}
+
+export interface MediaContinueWatchingItem extends LocalMedia {
+  last_season: number | null
+  last_episode: number | null
+  watched_seconds: number
+  total_seconds: number
+}

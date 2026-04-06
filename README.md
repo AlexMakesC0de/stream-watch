@@ -1,26 +1,43 @@
-# AnimeWatch
+# StreamWatch
 
-A desktop app to watch and track anime. Never lose your place again.
+A clean, ad-free desktop app for streaming anime, movies, and TV shows — with built-in tracking so you never lose your place.
 
 ## Features
 
-- Browse trending, seasonal, and popular anime (powered by AniList)
-- Search any anime by title
-- Organize your library — Watching, Plan to Watch, Completed, On Hold, Dropped
-- Built-in video player with auto-saving progress (episode + timestamp)
-- Continue Watching — pick up exactly where you left off
-- Episode grid showing completed, in-progress, and unwatched episodes
-- Auto-advance to the next episode
-- SUB/DUB toggle per anime
-- Related anime (sequels, prequels, side stories)
+- **Anime** — Browse trending, seasonal, and popular anime (powered by AniList). Search by title, toggle SUB/DUB, auto-advance episodes.
+- **Movies & TV** — Discover trending and popular movies & TV shows (powered by TMDB). Multiple streaming providers with one-click switching.
+- **Library** — Organize everything into Watching, Plan to Watch, Completed, On Hold, Dropped.
+- **Continue Watching** — Automatically saves your progress (episode + timestamp) so you can pick up right where you left off.
+- **Ad-Free** — Built-in ad blocker strips popups, overlays, and redirects from embed players.
+- **Cross-Platform** — Windows, macOS, and Linux.
 
-## Getting Started
+## Install
+
+Download the latest release for your platform from [Releases](https://github.com/AlexMakesC0de/anime-watch/releases).
+
+| Platform | Format |
+|----------|--------|
+| Windows  | `.exe` installer |
+| Linux    | `.AppImage` or `.deb` |
+| macOS    | `.dmg` |
+
+## Build from Source
 
 ```bash
 npm install
 npm run build
 npm run package
 ```
+
+Platform-specific:
+```bash
+npm run package:win    # Windows
+npm run package:linux  # Linux
+```
+
+## Tech Stack
+
+Electron · React · TypeScript · Tailwind CSS · sql.js
 
 ## License
 

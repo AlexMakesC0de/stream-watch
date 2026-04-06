@@ -11,7 +11,7 @@ interface TutorialStep {
 
 const steps: TutorialStep[] = [
   {
-    title: 'Welcome to AnimeWatch!',
+    title: 'Welcome to StreamWatch!',
     description:
       'This quick tour will show you around the app. It only takes a minute.',
     icon: <Play size={28} className="text-accent" />
@@ -113,7 +113,7 @@ export default function Tutorial(): JSX.Element | null {
             <div className="w-16 h-16 bg-accent/10 rounded-2xl flex items-center justify-center mx-auto mb-5">
               <Play size={32} className="text-accent" />
             </div>
-            <h2 className="text-xl font-bold text-white mb-2">Welcome to AnimeWatch!</h2>
+            <h2 className="text-xl font-bold text-white mb-2">Welcome to StreamWatch!</h2>
             <p className="text-dark-400 text-sm mb-8">
               Would you like a quick tour of the app?
             </p>

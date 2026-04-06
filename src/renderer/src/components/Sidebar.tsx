@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import {
   Home,
@@ -9,26 +9,47 @@ import {
   CheckCircle2,
   PauseCircle,
   XCircle,
-  Bookmark
+  Bookmark,
+  Tv,
+  Film,
+  ArrowLeftRight,
+  LayoutGrid,
+  Settings
 } from 'lucide-react'
 
-const mainLinks = [
-  { to: '/', icon: Home, label: 'Home' },
-  { to: '/search', icon: Search, label: 'Discover' },
-  { to: '/library', icon: Library, label: 'My Library' }
-]
+type AppMode = 'anime' | 'movies'
 
-const libraryFilters = [
-  { to: '/library/WATCHING', icon: Play, label: 'Watching', color: 'text-blue-400' },
-  { to: '/library/PLAN_TO_WATCH', icon: Bookmark, label: 'Plan to Watch', color: 'text-yellow-400' },
-  { to: '/library/COMPLETED', icon: CheckCircle2, label: 'Completed', color: 'text-green-400' },
-  { to: '/library/ON_HOLD', icon: PauseCircle, label: 'On Hold', color: 'text-orange-400' },
-  { to: '/library/DROPPED', icon: XCircle, label: 'Dropped', color: 'text-red-400' }
-]
+function getModeFromPath(pathname: string): AppMode {
+  if (pathname.startsWith('/movies')) return 'movies'
+  return 'anime'
+}
+
+function getLinks(mode: AppMode) {
+  const prefix = `/${mode}`
+  const mainLinks = [
+    { to: prefix, icon: Home, label: 'Home' },
+    { to: `${prefix}/search`, icon: Search, label: 'Discover' },
+    { to: `${prefix}/library`, icon: Library, label: 'My Library' }
+  ]
+  const libraryFilters = [
+    { to: `${prefix}/library/WATCHING`, icon: Play, label: 'Watching', color: 'text-blue-400' },
+    { to: `${prefix}/library/PLAN_TO_WATCH`, icon: Bookmark, label: 'Plan to Watch', color: 'text-yellow-400' },
+    { to: `${prefix}/library/COMPLETED`, icon: CheckCircle2, label: 'Completed', color: 'text-green-400' },
+    { to: `${prefix}/library/ON_HOLD`, icon: PauseCircle, label: 'On Hold', color: 'text-orange-400' },
+    { to: `${prefix}/library/DROPPED`, icon: XCircle, label: 'Dropped', color: 'text-red-400' }
+  ]
+  return { mainLinks, libraryFilters }
+}
 
 export default function Sidebar(): JSX.Element {
   const navigate = useNavigate()
+  const location = useLocation()
+  const mode = getModeFromPath(location.pathname)
+  const { mainLinks, libraryFilters } = getLinks(mode)
   const [appVersion, setAppVersion] = useState('...')
+
+  const otherMode: AppMode = mode === 'anime' ? 'movies' : 'anime'
+  const searchPlaceholder = mode === 'anime' ? 'Search anime...' : 'Search movies & TV...'
 
   useEffect(() => {
     let mounted = true
@@ -45,17 +66,22 @@ export default function Sidebar(): JSX.Element {
     }
   }, [])
 
+  function switchToMode(target: AppMode): void {
+    localStorage.setItem('last-mode', target)
+    navigate(`/${target}`)
+  }
+
   return (
     <aside className="w-56 bg-dark-950 border-r border-dark-900 flex flex-col shrink-0">
       {/* Quick search */}
       <div className="p-3">
         <button
-          onClick={() => navigate('/search')}
+          onClick={() => navigate(`/${mode}/search`)}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-dark-900 text-dark-400
                      hover:bg-dark-800 hover:text-dark-300 transition-colors text-sm"
         >
           <Search size={15} />
-          <span>Search anime...</span>
+          <span>{searchPlaceholder}</span>
         </button>
       </div>
 
@@ -65,7 +91,7 @@ export default function Sidebar(): JSX.Element {
           <NavLink
             key={link.to}
             to={link.to}
-            end={link.to === '/'}
+            end={link.to === `/${mode}`}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                 isActive
@@ -105,9 +131,42 @@ export default function Sidebar(): JSX.Element {
         </div>
       </div>
 
-      {/* Spacer + version */}
-      <div className="mt-auto p-4">
-        <div className="flex items-center gap-2 text-dark-600 text-xs">
+      {/* Spacer + settings + mode switcher + version */}
+      <div className="mt-auto p-3 space-y-2">
+        {/* Settings */}
+        <button
+          onClick={() => navigate(`/${mode}/settings`)}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium
+                     text-dark-400 hover:bg-dark-900 hover:text-white transition-colors"
+        >
+          <Settings size={16} />
+          Settings
+        </button>
+
+        {/* Switch mode */}
+        <button
+          onClick={() => switchToMode(otherMode)}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium
+                     text-dark-400 hover:bg-dark-900 hover:text-white transition-colors"
+        >
+          {otherMode === 'movies' ? <Film size={16} /> : <Tv size={16} />}
+          Switch to {otherMode === 'movies' ? 'Movies & TV' : 'Anime'}
+        </button>
+
+        {/* Back to hub */}
+        <button
+          onClick={() => {
+            localStorage.removeItem('hub-remember-mode')
+            navigate('/')
+          }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+                     text-dark-500 hover:bg-dark-900 hover:text-dark-300 transition-colors"
+        >
+          <LayoutGrid size={16} />
+          Back to Hub
+        </button>
+
+        <div className="flex items-center gap-2 text-dark-600 text-xs px-3 pt-1">
           <Clock size={12} />
           <span>v{appVersion}</span>
         </div>

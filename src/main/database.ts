@@ -87,6 +87,57 @@ function createTables(): void {
   try { db.run('CREATE INDEX idx_anime_anilist_id ON anime(anilist_id)') } catch { /* exists */ }
   try { db.run('CREATE INDEX idx_progress_anime ON watch_progress(anime_id)') } catch { /* exists */ }
   try { db.run('CREATE INDEX idx_progress_watched ON watch_progress(watched_at)') } catch { /* exists */ }
+
+  // ── Media tables (Movies & TV) ──────────────────────────────
+  db.run(`
+    CREATE TABLE IF NOT EXISTS media (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tmdb_id INTEGER NOT NULL,
+      media_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      poster_path TEXT,
+      backdrop_path TEXT,
+      overview TEXT,
+      release_date TEXT,
+      vote_average REAL,
+      genres TEXT,
+      runtime INTEGER,
+      number_of_seasons INTEGER,
+      number_of_episodes INTEGER,
+      status TEXT NOT NULL DEFAULT 'PLAN_TO_WATCH',
+      added_at DATETIME DEFAULT (datetime('now')),
+      updated_at DATETIME DEFAULT (datetime('now')),
+      UNIQUE(tmdb_id, media_type)
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS media_watch_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      media_id INTEGER NOT NULL,
+      season_number INTEGER,
+      episode_number INTEGER,
+      watched_seconds REAL DEFAULT 0,
+      total_seconds REAL DEFAULT 0,
+      completed INTEGER DEFAULT 0,
+      watched_at DATETIME DEFAULT (datetime('now')),
+      FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE CASCADE,
+      UNIQUE(media_id, season_number, episode_number)
+    )
+  `)
+
+  try { db.run('CREATE INDEX idx_media_status ON media(status)') } catch { /* exists */ }
+  try { db.run('CREATE INDEX idx_media_tmdb ON media(tmdb_id, media_type)') } catch { /* exists */ }
+  try { db.run('CREATE INDEX idx_media_progress_media ON media_watch_progress(media_id)') } catch { /* exists */ }
+  try { db.run('CREATE INDEX idx_media_progress_watched ON media_watch_progress(watched_at)') } catch { /* exists */ }
+
+  // ── Settings ─────────────────────────────────────────────────
+  db.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `)
 }
 
 function migrateDubCache(): void {
@@ -327,4 +378,189 @@ export function closeDatabase(): void {
     persistToFile()
     db.close()
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MEDIA (Movies & TV) — mirrors the anime API above
+// ═══════════════════════════════════════════════════════════════
+
+export function addMedia(media: Record<string, unknown>): void {
+  execute(
+    `INSERT OR REPLACE INTO media
+      (tmdb_id, media_type, title, poster_path, backdrop_path, overview,
+       release_date, vote_average, genres, runtime, number_of_seasons,
+       number_of_episodes, status, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [
+      media.tmdbId, media.mediaType, media.title, media.posterPath, media.backdropPath,
+      media.overview, media.releaseDate, media.voteAverage, media.genres, media.runtime,
+      media.numberOfSeasons, media.numberOfEpisodes, media.status
+    ]
+  )
+}
+
+export function getMediaLibrary(status?: string): Record<string, unknown>[] {
+  if (status) {
+    return queryAll('SELECT * FROM media WHERE status = ? ORDER BY updated_at DESC', [status])
+  }
+  return queryAll('SELECT * FROM media ORDER BY updated_at DESC')
+}
+
+export function getMedia(tmdbId: number, mediaType: string): Record<string, unknown> | null {
+  return queryOne('SELECT * FROM media WHERE tmdb_id = ? AND media_type = ?', [tmdbId, mediaType])
+}
+
+export function updateMediaStatus(tmdbId: number, mediaType: string, status: string): void {
+  execute(
+    "UPDATE media SET status = ?, updated_at = datetime('now') WHERE tmdb_id = ? AND media_type = ?",
+    [status, tmdbId, mediaType]
+  )
+}
+
+export function removeMedia(tmdbId: number, mediaType: string): void {
+  execute(
+    'DELETE FROM media_watch_progress WHERE media_id = (SELECT id FROM media WHERE tmdb_id = ? AND media_type = ?)',
+    [tmdbId, mediaType]
+  )
+  execute('DELETE FROM media WHERE tmdb_id = ? AND media_type = ?', [tmdbId, mediaType])
+}
+
+export function saveMediaProgress(progress: Record<string, unknown>): void {
+  const existing = queryOne(
+    `SELECT mwp.id, mwp.completed FROM media_watch_progress mwp
+     JOIN media m ON mwp.media_id = m.id
+     WHERE m.tmdb_id = ? AND m.media_type = ? AND mwp.season_number IS ? AND mwp.episode_number IS ?`,
+    [progress.tmdbId, progress.mediaType, progress.seasonNumber ?? null, progress.episodeNumber ?? null]
+  )
+
+  if (existing) {
+    const wasCompleted = (existing.completed as number) === 1
+    const newCompleted = wasCompleted ? 1 : progress.completed
+
+    execute(
+      `UPDATE media_watch_progress SET
+        watched_seconds = ?, total_seconds = ?, completed = ?, watched_at = datetime('now')
+       WHERE id = ?`,
+      [progress.watchedSeconds, progress.totalSeconds, newCompleted, existing.id]
+    )
+  } else {
+    execute(
+      `INSERT INTO media_watch_progress (media_id, season_number, episode_number, watched_seconds, total_seconds, completed)
+       VALUES ((SELECT id FROM media WHERE tmdb_id = ? AND media_type = ?), ?, ?, ?, ?, ?)`,
+      [
+        progress.tmdbId, progress.mediaType, progress.seasonNumber ?? null,
+        progress.episodeNumber ?? null, progress.watchedSeconds,
+        progress.totalSeconds, progress.completed
+      ]
+    )
+  }
+}
+
+export function getMediaProgress(
+  tmdbId: number,
+  mediaType: string
+): Record<string, unknown>[] {
+  return queryAll(
+    `SELECT mwp.* FROM media_watch_progress mwp
+     JOIN media m ON mwp.media_id = m.id
+     WHERE m.tmdb_id = ? AND m.media_type = ?
+     ORDER BY mwp.season_number ASC, mwp.episode_number ASC`,
+    [tmdbId, mediaType]
+  )
+}
+
+export function getMediaEpisodeProgress(
+  tmdbId: number,
+  mediaType: string,
+  seasonNumber: number | null,
+  episodeNumber: number | null
+): Record<string, unknown> | null {
+  return queryOne(
+    `SELECT mwp.* FROM media_watch_progress mwp
+     JOIN media m ON mwp.media_id = m.id
+     WHERE m.tmdb_id = ? AND m.media_type = ? AND mwp.season_number IS ? AND mwp.episode_number IS ?`,
+    [tmdbId, mediaType, seasonNumber, episodeNumber]
+  )
+}
+
+export function getMediaContinueWatching(): Record<string, unknown>[] {
+  return queryAll(
+    `SELECT m.*, mwp.season_number as last_season, mwp.episode_number as last_episode,
+            mwp.watched_seconds, mwp.total_seconds
+     FROM media m
+     JOIN media_watch_progress mwp ON mwp.media_id = m.id
+     WHERE m.status = 'WATCHING'
+       AND mwp.watched_at = (
+         SELECT MAX(mwp2.watched_at) FROM media_watch_progress mwp2 WHERE mwp2.media_id = m.id
+       )
+       AND mwp.completed = 0
+     ORDER BY mwp.watched_at DESC
+     LIMIT 20`
+  )
+}
+
+export function toggleMediaEpisodeCompleted(
+  tmdbId: number,
+  mediaType: string,
+  seasonNumber: number | null,
+  episodeNumber: number | null,
+  completed: boolean
+): void {
+  const existing = queryOne(
+    `SELECT mwp.id FROM media_watch_progress mwp
+     JOIN media m ON mwp.media_id = m.id
+     WHERE m.tmdb_id = ? AND m.media_type = ? AND mwp.season_number IS ? AND mwp.episode_number IS ?`,
+    [tmdbId, mediaType, seasonNumber, episodeNumber]
+  )
+
+  if (existing) {
+    execute(
+      `UPDATE media_watch_progress SET completed = ?, watched_at = datetime('now') WHERE id = ?`,
+      [completed ? 1 : 0, existing.id]
+    )
+  } else if (completed) {
+    execute(
+      `INSERT INTO media_watch_progress (media_id, season_number, episode_number, watched_seconds, total_seconds, completed)
+       VALUES ((SELECT id FROM media WHERE tmdb_id = ? AND media_type = ?), ?, ?, 0, 0, 1)`,
+      [tmdbId, mediaType, seasonNumber, episodeNumber]
+    )
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SETTINGS
+// ═══════════════════════════════════════════════════════════════
+
+const SETTING_DEFAULTS: Record<string, string> = {
+  'accentColor': '#6c5ce7',
+  'movieAccentColor': '#e50914',
+  'popcornMirrors': 'https://fusme.link,https://jfper.link,https://uxert.link,https://yrkde.link',
+  'torrentTimeout': '90',
+  'maxTorrentConnections': '100',
+  'seedAfterDownload': 'false'
+}
+
+export function getSetting(key: string): string {
+  const row = queryOne('SELECT value FROM settings WHERE key = ?', [key])
+  return row ? (row.value as string) : (SETTING_DEFAULTS[key] ?? '')
+}
+
+export function setSetting(key: string, value: string): void {
+  execute(
+    'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+    [key, value]
+  )
+}
+
+export function getAllSettings(): Record<string, string> {
+  const rows = queryAll('SELECT key, value FROM settings')
+  const settings = { ...SETTING_DEFAULTS }
+  for (const row of rows) {
+    settings[row.key as string] = row.value as string
+  }
+  return settings
+}
+
+export function resetSettings(): void {
+  execute('DELETE FROM settings')
 }

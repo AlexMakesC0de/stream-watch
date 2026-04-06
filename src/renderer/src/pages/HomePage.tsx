@@ -108,7 +108,7 @@ export default function HomePage(): JSX.Element {
               <div
                 key={item.anilist_id}
                 onClick={() =>
-                  navigate(`/watch/${item.anilist_id}/${item.last_episode}`)
+                  navigate(`/anime/watch/${item.anilist_id}/${item.last_episode}`)
                 }
                 className="flex items-center gap-3 bg-dark-900 rounded-lg overflow-hidden cursor-pointer
                            hover:bg-dark-800 transition-colors group"

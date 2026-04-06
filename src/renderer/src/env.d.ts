@@ -34,6 +34,17 @@ interface AnimeWatchAPI {
     audioType?: 'sub' | 'dub'
   }) => Promise<StreamingInfo>
   clearProviderCache: (anilistId: number) => Promise<void>
+  // Media (movies/TV) methods
+  addMedia: (media: Record<string, unknown>) => Promise<unknown>
+  getMediaLibrary: (status?: string) => Promise<unknown[]>
+  getMedia: (tmdbId: number, mediaType: string) => Promise<unknown>
+  updateMediaStatus: (tmdbId: number, mediaType: string, status: string) => Promise<unknown>
+  removeMedia: (tmdbId: number, mediaType: string) => Promise<unknown>
+  saveMediaProgress: (progress: Record<string, unknown>) => Promise<unknown>
+  getMediaProgress: (tmdbId: number, mediaType: string) => Promise<unknown[]>
+  getMediaEpisodeProgress: (tmdbId: number, mediaType: string, seasonNumber: number, episodeNumber: number) => Promise<unknown>
+  getMediaContinueWatching: () => Promise<unknown[]>
+  toggleMediaEpisodeCompleted: (tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null, completed: boolean) => Promise<unknown>
   minimizeWindow: () => void
   maximizeWindow: () => void
   closeWindow: () => void
@@ -43,6 +54,11 @@ interface AnimeWatchAPI {
   onUpdateAvailable: (callback: (version: string) => void) => () => void
   onUpdateDownloaded: (callback: (version: string) => void) => () => void
   restartToUpdate: () => void
+  // Settings
+  getSetting: (key: string) => Promise<string>
+  setSetting: (key: string, value: string) => Promise<void>
+  getAllSettings: () => Promise<Record<string, string>>
+  resetSettings: () => Promise<void>
 }
 
 declare global {

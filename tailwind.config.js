@@ -18,10 +18,10 @@ module.exports = {
           950: '#111214'
         },
         accent: {
-          DEFAULT: '#6c5ce7',
-          hover: '#7c6ff0',
-          light: '#a29bfe',
-          dark: '#5a4bd1'
+          DEFAULT: 'var(--color-accent)',
+          hover: 'var(--color-accent-hover)',
+          light: 'var(--color-accent-light)',
+          dark: 'var(--color-accent-dark)'
         }
       },
       fontFamily: {

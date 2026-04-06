@@ -17,7 +17,7 @@ export default function AnimeCard({ anime, showProgress }: AnimeCardProps): JSX.
   return (
     <div
       className="anime-card cursor-pointer group"
-      onClick={() => navigate(`/anime/${anime.id}`)}
+      onClick={() => navigate(`/anime/detail/${anime.id}`)}
     >
       {/* Cover Image */}
       <div className="relative aspect-[3/4] overflow-hidden">
@@ -34,7 +34,7 @@ export default function AnimeCard({ anime, showProgress }: AnimeCardProps): JSX.
             className="btn-primary text-sm w-full justify-center"
             onClick={(e) => {
               e.stopPropagation()
-              navigate(`/anime/${anime.id}`)
+              navigate(`/anime/detail/${anime.id}`)
             }}
           >
             <Play size={14} fill="currentColor" />
