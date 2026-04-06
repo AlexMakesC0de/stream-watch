@@ -62,21 +62,165 @@ export default function EmbedPlayer({
     if (!webview) return
     setIsLoading(false)
 
+    // Block popups/new-windows from ads
+    try {
+      const wc = (webview as any).getWebContents?.()
+      if (wc) {
+        wc.setWindowOpenHandler(() => ({ action: 'deny' }))
+      }
+    } catch {
+      // renderer may not have access — main process handler will cover it
+    }
+
     // Inject CSS to clean up the player (hide ads, overlays, make video fill)
     webview.insertCSS(`
       body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: #000 !important; }
-      /* Hide common ad/overlay elements */
-      .ads, .ad-overlay, .ad-container, .popup, .overlay,
-      [class*="ad-"], [class*="popup"], [id*="ad-"], [id*="popup"],
-      .jw-logo, .vjs-overlay, .plyr__ads,
-      div[style*="z-index: 999"], div[style*="z-index: 9999"],
-      .close-btn, #close-btn { display: none !important; }
+      /* Hide known ad/overlay elements — keep selectors specific to avoid breaking the player */
+      .ads, .ad-overlay, .ad-container,
+      [id*="ad-container"], [id*="ad-overlay"],
+      .jw-logo, .plyr__ads,
+      div[style*="z-index: 2147483647"], div[style*="z-index:2147483647"],
+      div[style*="z-index: 99999"], div[style*="z-index:99999"],
+      div[style*="z-index: 9999"], div[style*="z-index:9999"],
+      a[target="_blank"][style*="position"],
+      .overlay-ad, #overlay-ad,
+      iframe[src*="ads"], iframe[src*="banner"] { display: none !important; }
+      /* Hide NSFW ad elements */
+      a[href*="porn"], a[href*="xxx"], a[href*="adult"], a[href*="sex.com"],
+      a[href*="dating"], a[href*="stripchat"], a[href*="livejasmin"], a[href*="cam4"],
+      a[href*="chaturbate"], a[href*="bongacams"], a[href*="istripper"],
+      a[href*="onlyfans"], a[href*="magsrv"], a[href*="realsrv"],
+      a[href*="clickadilla"], a[href*="jads.co"],
+      img[src*="magsrv"], img[src*="realsrv"],
+      div[id*="exoclick"], div[id*="juicyads"],
+      div[class*="exoclick"], div[class*="juicyads"] { display: none !important; }
+      /* Prevent fullscreen ad overlays — but not the player itself */
+      body > div[style*="position: fixed"]:not(:has(video)):not(:has(iframe)),
+      body > div[style*="position:fixed"]:not(:has(video)):not(:has(iframe)) {
+        display: none !important;
+      }
       /* Make the video player fill the entire view */
       video { width: 100% !important; height: 100% !important; object-fit: contain !important; }
       .jw-wrapper, .video-js, .plyr, [class*="player"] {
         width: 100% !important; height: 100% !important;
         position: fixed !important; top: 0 !important; left: 0 !important;
       }
+    `).catch(() => {})
+
+    // Inject popup/redirect blocker script
+    webview.executeJavaScript(`
+      (function() {
+        // Block window.open (primary popup mechanism)
+        window.open = function() { return null; };
+
+        // Block ad scripts from being injected (but allow all other DOM operations)
+        var origAppend = Element.prototype.appendChild;
+        Element.prototype.appendChild = function(child) {
+          if (child && child.tagName === 'SCRIPT' && child.src) {
+            var src = child.src.toLowerCase();
+            if (src.includes('popads') || src.includes('popcash') || src.includes('popunder') ||
+                src.includes('adsterra') || src.includes('exoclick') || src.includes('propellerads') ||
+                src.includes('trafficjunky') || src.includes('juicyads') || src.includes('admaven') ||
+                src.includes('googlesyndication') || src.includes('doubleclick')) {
+              return child;
+            }
+          }
+          return origAppend.call(this, child);
+        };
+        var origInsert = Element.prototype.insertBefore;
+        Element.prototype.insertBefore = function(child, ref) {
+          if (child && child.tagName === 'SCRIPT' && child.src) {
+            var src = child.src.toLowerCase();
+            if (src.includes('popads') || src.includes('popcash') || src.includes('popunder') ||
+                src.includes('adsterra') || src.includes('exoclick') || src.includes('propellerads') ||
+                src.includes('trafficjunky') || src.includes('juicyads') || src.includes('admaven') ||
+                src.includes('googlesyndication') || src.includes('doubleclick')) {
+              return child;
+            }
+          }
+          return origInsert.call(this, child, ref);
+        };
+
+        // Block onclick popups on document
+        document.addEventListener('click', function(e) {
+          var t = e.target;
+          while (t && t !== document.body) {
+            if (t.tagName === 'A' && t.target === '_blank') {
+              e.preventDefault();
+              e.stopPropagation();
+              return false;
+            }
+            t = t.parentElement;
+          }
+        }, true);
+
+        // Shared ad-removal patterns used by both MutationObserver and setInterval
+        var nsfwPatterns = ['porn','xxx','adult','sex.com','dating','stripchat','livejasmin',
+          'cam4','chaturbate','bongacams','istripper','onlyfans','magsrv','realsrv',
+          'clickadilla','jads.co','exoclick','juicyads','trafficjunky','adsterra'];
+
+        function isPlayerEl(el) {
+          return el.querySelector('video') || el.querySelector('iframe') ||
+            el.closest('.jw-wrapper') || el.closest('.video-js') || el.closest('.plyr');
+        }
+
+        function removeAdEl(el) {
+          if (el && el.parentElement && !isPlayerEl(el)) el.remove();
+        }
+
+        function sweepAdOverlays() {
+          // High z-index overlays without video/iframe are almost always ads
+          document.querySelectorAll(
+            'div[style*="z-index: 2147483647"], div[style*="z-index:2147483647"], ' +
+            'div[style*="z-index: 99999"], div[style*="z-index:99999"], ' +
+            'div[style*="z-index: 9999"], div[style*="z-index:9999"]'
+          ).forEach(function(el) { removeAdEl(el); });
+
+          // Remove NSFW anchor elements and empty wrappers
+          document.querySelectorAll('a[href]').forEach(function(a) {
+            var href = a.href.toLowerCase();
+            for (var i = 0; i < nsfwPatterns.length; i++) {
+              if (href.includes(nsfwPatterns[i])) {
+                var parent = a.parentElement;
+                a.remove();
+                if (parent && !parent.querySelector('video') && !parent.querySelector('iframe') && parent.children.length === 0) {
+                  parent.remove();
+                }
+                break;
+              }
+            }
+          });
+        }
+
+        // MutationObserver: removes ad nodes the instant they're injected into the DOM
+        try {
+          var adObserver = new MutationObserver(function(mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+              var added = mutations[i].addedNodes;
+              for (var j = 0; j < added.length; j++) {
+                var node = added[j];
+                if (node.nodeType !== 1) continue;
+                var style = node.getAttribute ? node.getAttribute('style') || '' : '';
+                var zMatch = style.match(/z-index\s*:\s*(\d+)/);
+                if (zMatch && parseInt(zMatch[1], 10) >= 9999 && !isPlayerEl(node)) {
+                  node.remove();
+                  continue;
+                }
+                var href = (node.tagName === 'A' && node.href) ? node.href.toLowerCase() : '';
+                if (href) {
+                  for (var k = 0; k < nsfwPatterns.length; k++) {
+                    if (href.includes(nsfwPatterns[k])) { node.remove(); break; }
+                  }
+                }
+              }
+            }
+          });
+          adObserver.observe(document.documentElement, { childList: true, subtree: true });
+        } catch(e) {}
+
+        // Fallback sweep every 2s for anything that slipped through
+        setInterval(sweepAdOverlays, 2000);
+      })();
     `).catch(() => {})
 
     // Inject JS to report progress and seek to initial time
@@ -247,9 +391,16 @@ export default function EmbedPlayer({
     webview.addEventListener('enter-html-full-screen', handleEnterFS)
     webview.addEventListener('leave-html-full-screen', handleLeaveFS)
 
+    // Block popup windows (ad clicks that try to open new windows)
+    const handleNewWindow = (e: Event): void => {
+      e.preventDefault()
+    }
+    webview.addEventListener('new-window', handleNewWindow)
+
     return () => {
       webview.removeEventListener('enter-html-full-screen', handleEnterFS)
       webview.removeEventListener('leave-html-full-screen', handleLeaveFS)
+      webview.removeEventListener('new-window', handleNewWindow)
     }
   }, [])
 
@@ -279,6 +430,92 @@ export default function EmbedPlayer({
       webview.removeEventListener('did-fail-load', onDidFailLoad)
     }
   }, [onDomReady, onDidFailLoad])
+
+  // ─── Keyboard shortcuts ──────────────────────────────────────
+  useEffect(() => {
+    const webview = webviewRef.current
+    if (!webview) return
+
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (!webview) return
+      // Don't handle if user is typing in an input
+      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return
+
+      switch (e.key) {
+        case ' ':
+        case 'k':
+          e.preventDefault()
+          webview.executeJavaScript(`
+            (function() {
+              const v = document.querySelector('video');
+              if (!v) return;
+              v.paused ? v.play() : v.pause();
+            })();
+          `).catch(() => {})
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          webview.executeJavaScript(`
+            (function() {
+              const v = document.querySelector('video');
+              if (v) v.currentTime = Math.max(0, v.currentTime - 10);
+            })();
+          `).catch(() => {})
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          webview.executeJavaScript(`
+            (function() {
+              const v = document.querySelector('video');
+              if (v) v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10);
+            })();
+          `).catch(() => {})
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          webview.executeJavaScript(`
+            (function() {
+              const v = document.querySelector('video');
+              if (v) v.volume = Math.min(1, v.volume + 0.1);
+            })();
+          `).catch(() => {})
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          webview.executeJavaScript(`
+            (function() {
+              const v = document.querySelector('video');
+              if (v) v.volume = Math.max(0, v.volume - 0.1);
+            })();
+          `).catch(() => {})
+          break
+        case 'f':
+        case 'F': {
+          e.preventDefault()
+          const target = fullscreenTarget?.current || containerRef.current
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {})
+          } else if (target) {
+            target.requestFullscreen().catch(() => {})
+          }
+          break
+        }
+        case 'm':
+        case 'M':
+          e.preventDefault()
+          webview.executeJavaScript(`
+            (function() {
+              const v = document.querySelector('video');
+              if (v) v.muted = !v.muted;
+            })();
+          `).catch(() => {})
+          break
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [fullscreenTarget])
 
   useEffect(() => {
     const webview = webviewRef.current

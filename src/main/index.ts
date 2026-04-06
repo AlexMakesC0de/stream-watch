@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, session } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
@@ -16,7 +16,21 @@ import {
   getContinueWatching,
   clearProviderMapping,
   toggleEpisodeCompleted,
-  markAllEpisodesCompleted
+  markAllEpisodesCompleted,
+  addMedia,
+  getMediaLibrary,
+  getMedia,
+  updateMediaStatus,
+  removeMedia,
+  saveMediaProgress,
+  getMediaProgress,
+  getMediaEpisodeProgress,
+  getMediaContinueWatching,
+  toggleMediaEpisodeCompleted,
+  getSetting,
+  setSetting,
+  getAllSettings,
+  resetSettings
 } from './database'
 import { fetchEpisodeSources, type FetchEpisodeOpts } from './providers'
 import { startProxyServer, stopProxyServer } from './proxy'
@@ -126,6 +140,34 @@ function registerIpcHandlers(): void {
     clearProviderMapping(anilistId)
   )
 
+  // ── Media (Movies & TV) ──────────────────────────────────────
+  ipcMain.handle('db:add-media', (_event, media) => addMedia(media))
+  ipcMain.handle('db:get-media-library', (_event, status?: string) => getMediaLibrary(status))
+  ipcMain.handle('db:get-media', (_event, tmdbId: number, mediaType: string) =>
+    getMedia(tmdbId, mediaType)
+  )
+  ipcMain.handle('db:update-media-status', (_event, tmdbId: number, mediaType: string, status: string) =>
+    updateMediaStatus(tmdbId, mediaType, status)
+  )
+  ipcMain.handle('db:remove-media', (_event, tmdbId: number, mediaType: string) =>
+    removeMedia(tmdbId, mediaType)
+  )
+  ipcMain.handle('db:save-media-progress', (_event, progress) => saveMediaProgress(progress))
+  ipcMain.handle('db:get-media-progress', (_event, tmdbId: number, mediaType: string) =>
+    getMediaProgress(tmdbId, mediaType)
+  )
+  ipcMain.handle(
+    'db:get-media-episode-progress',
+    (_event, tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null) =>
+      getMediaEpisodeProgress(tmdbId, mediaType, seasonNumber, episodeNumber)
+  )
+  ipcMain.handle('db:get-media-continue-watching', () => getMediaContinueWatching())
+  ipcMain.handle(
+    'db:toggle-media-episode-completed',
+    (_event, tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null, completed: boolean) =>
+      toggleMediaEpisodeCompleted(tmdbId, mediaType, seasonNumber, episodeNumber, completed)
+  )
+
   // ── Window controls ──────────────────────────────────────────
   ipcMain.on('window:minimize', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()
@@ -153,6 +195,12 @@ function registerIpcHandlers(): void {
   ipcMain.on('updater:restart', () => {
     autoUpdater.quitAndInstall(false, true)
   })
+
+  // ── Settings ──────────────────────────────────────────────
+  ipcMain.handle('settings:get', (_event, key: string) => getSetting(key))
+  ipcMain.handle('settings:set', (_event, key: string, value: string) => setSetting(key, value))
+  ipcMain.handle('settings:get-all', () => getAllSettings())
+  ipcMain.handle('settings:reset', () => resetSettings())
 }
 
 // ─── App Lifecycle ─────────────────────────────────────────────
@@ -160,16 +208,295 @@ function registerIpcHandlers(): void {
 // Allow autoplay in webviews (episode player)
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
+// ─── Ad/popup blocker for the embed player webview ─────────────
+
+function setupEmbedSessionAdBlocker(): void {
+  const ses = session.fromPartition('persist:extractor')
+
+  // Comprehensive list of ad/tracking/popup domains
+  const blockedDomains = [
+    // Google ads & tracking
+    'googletagmanager.com',
+    'google-analytics.com',
+    'googleadservices.com',
+    'googlesyndication.com',
+    'doubleclick.net',
+    'adservice.google.com',
+    // Common ad networks
+    'popads.net',
+    'popcash.net',
+    'popunder.net',
+    'pop.liveonlinetv247.info',
+    'adb.placementapi.com',
+    'ad.plus',
+    'adnxs.com',
+    'adskeeper.co.uk',
+    'adskeeper.com',
+    'adsterra.com',
+    'adsterracdn.com',
+    'bidswitch.net',
+    'bongacams.com',
+    'bounceexchange.com',
+    'bvtpk.com',
+    'casalemedia.com',
+    'cdnads.com',
+    'chaturbate.com',
+    'cpx.to',
+    'criteo.com',
+    'dataunlocker.com',
+    'doublepimp.com',
+    'exoclick.com',
+    'exosrv.com',
+    'hilltopads.net',
+    'imedia.com',
+    'juicyads.com',
+    'livestream247.tv',
+    'liveonlinetv247.info',
+    'markerapp.net',
+    'mixedinkey.com',
+    'offerforge.com',
+    'outbrain.com',
+    'perf-serving.com',
+    'plausible.io',
+    'plerdy.com',
+    'propellerads.com',
+    'pushame.com',
+    'pushnami.com',
+    'richpush.co',
+    'rubiconproject.com',
+    'seedtag.com',
+    'serving-sys.com',
+    'smartadserver.com',
+    'syndication.exdynsrv.com',
+    'taboola.com',
+    'trafficfactory.biz',
+    'trafficjunky.net',
+    'tsyndicate.com',
+    'vidazoo.com',
+    'videovard.to',
+    'viglink.com',
+    'volatiledeals.com',
+    'zedo.com',
+    'zemanta.com',
+    // VidSrc-specific ad domains
+    'dfrsgbn.com',
+    'fgttehnh.com',
+    'nmhdkhb.com',
+    'tcfrhnbgf.com',
+    'wsresgnh.com',
+    'nxtrvlb.com',
+    // Additional embed ad networks
+    'a-ads.com',
+    'ad-maven.com',
+    'ad4m.at',
+    'adcash.com',
+    'adhealers.com',
+    'adition.com',
+    'admaven.com',
+    'adtng.com',
+    'betterads.io',
+    'cdn77.org/ads',
+    'coinzillatag.com',
+    'disqus.com',
+    'etahub.com',
+    'flashtalking.com',
+    'gammaplatform.com',
+    'go.oclasrv.com',
+    'go.stratos-ad.com',
+    'imasdk.googleapis.com',
+    'mfadsrvr.com',
+    'mgid.com',
+    'mopub.com',
+    'onclickmax.com',
+    'onclickmega.com',
+    'onclickperformance.com',
+    'revcontent.com',
+    'revdepo.com',
+    'richads.com',
+    's2s.popcash.net',
+    'servehttp.com',
+    'sharedcount.com',
+    'srvtrck.com',
+    'streamhub.to',
+    'tpc.googlesyndication.com',
+    'vemtoutcherede.com',
+    'whos.amung.us',
+    'ylx-aff.com',
+    // NSFW ad networks
+    'magsrv.com',
+    'a.magsrv.com',
+    'realsrv.com',
+    'syndication.realsrv.com',
+    'jads.co',
+    'clickadilla.com',
+    'clickaine.com',
+    'hilltopads.com',
+    'clickstar.me',
+    'pushground.com',
+    'img.trafficjunky.net',
+    'ads.trafficjunky.net',
+    'rayrfrh.com',
+    'acwebconnecting.com',
+    'mtrgt.com',
+    'ahrtv.com',
+    'tsyndicate.com',
+    'a.realsrv.com',
+    'mc.yandex.ru',
+    'aweptjmp.com',
+    'acscdn.com',
+    'adsco.re',
+    'dfrsgbn.com',
+    'dolohen.com',
+    'exdynsrv.com',
+    'hpyrdr.com',
+    'jokfrr.com',
+    'kefrfrh.com',
+    'lnkrdr.com',
+    'mxtrck.com',
+    'nptfr.com',
+    'optmnstr.com',
+    'ptrckpm.com',
+    'rfihub.com',
+    'rtmark.net',
+    'slfrdr.com',
+    'streamdefence.com',
+    'tfyctrl.com',
+    't.co/redirect',
+    'voourl.com',
+    'xtremepush.com',
+    // NSFW site domains (to block redirects to them)
+    'pornhub.com',
+    'xhamster.com',
+    'xvideos.com',
+    'stripchat.com',
+    'livejasmin.com',
+    'cam4.com',
+    'myfreecams.com',
+    'istripper.com',
+    'camsoda.com',
+    'nuvid.com',
+    'tubecorp.com',
+    'chaturbate.com',
+    'bongacams.com',
+    'onlyfans.com'
+  ]
+
+  // Block requests to ad domains
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    const url = details.url.toLowerCase()
+
+    // Block known ad domains
+    if (blockedDomains.some((d) => url.includes(d))) {
+      callback({ cancel: true })
+      return
+    }
+
+    // Block common ad URL patterns
+    if (
+      (url.includes('/pop') && (url.includes('.js') || url.includes('under'))) ||
+      url.includes('/ads/') ||
+      url.includes('/ads?') ||
+      url.includes('/adserv') ||
+      url.includes('pagead') ||
+      url.includes('prebid') ||
+      url.includes('/vast/') ||
+      url.includes('/vast?') ||
+      url.includes('/vpaid') ||
+      url.includes('clickunder') ||
+      url.includes('popunder') ||
+      url.includes('popcash') ||
+      url.includes('clickadu') ||
+      url.includes('xxx') ||
+      url.includes('porn') ||
+      url.includes('adult') ||
+      url.includes('sex.com') ||
+      url.includes('dating') ||
+      url.includes('cam4.com') ||
+      url.includes('stripchat') ||
+      url.includes('livejasmin') ||
+      url.includes('istripper')
+    ) {
+      callback({ cancel: true })
+      return
+    }
+
+    callback({})
+  })
+
+  // Strip CSP headers that could interfere and block X-Frame-Options
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    const headers = { ...details.responseHeaders }
+    for (const key of Object.keys(headers)) {
+      const lk = key.toLowerCase()
+      if (
+        lk.startsWith('content-security-policy') ||
+        lk === 'x-frame-options' ||
+        lk === 'referrer-policy'
+      ) {
+        delete headers[key]
+      }
+    }
+    callback({ responseHeaders: headers })
+  })
+
+  // Block popup windows (the primary ad delivery mechanism)
+  ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    // Block if this is a navigation to a different origin from a popup
+    if (details.resourceType === 'subFrame') {
+      const url = details.url.toLowerCase()
+      if (blockedDomains.some((d) => url.includes(d))) {
+        callback({ cancel: true })
+        return
+      }
+    }
+    callback({ requestHeaders: details.requestHeaders })
+  })
+}
+
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.animewatch.app')
+  electronApp.setAppUserModelId('com.streamwatch.app')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  // Block popup windows from webview contents (embed player ads)
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() === 'webview') {
+      contents.setWindowOpenHandler(() => {
+        return { action: 'deny' }
+      })
+
+      // Block ad/NSFW redirects via window.location, meta refresh, etc.
+      const adNavigationPatterns = [
+        'porn', 'xxx', 'adult', 'sex.com', 'dating',
+        'magsrv', 'realsrv', 'clickadilla', 'jads.co',
+        'popads', 'popcash', 'adsterra', 'exoclick',
+        'trafficjunky', 'propellerads', 'hilltopads', 'pushground',
+        'chaturbate', 'bongacams', 'stripchat', 'livejasmin',
+        'cam4.com', 'istripper', 'onlyfans', 'dolohen',
+        'exdynsrv', 'adsco.re', 'aweptjmp', 'ahrtv'
+      ]
+
+      const isAdUrl = (url: string): boolean => {
+        const lower = url.toLowerCase()
+        return adNavigationPatterns.some((p) => lower.includes(p))
+      }
+
+      contents.on('will-navigate', (event, url) => {
+        if (isAdUrl(url)) event.preventDefault()
+      })
+
+      contents.on('will-redirect', (event, url) => {
+        if (isAdUrl(url)) event.preventDefault()
+      })
+    }
+  })
+
   await initDatabase()
   await startProxyServer()
   registerIpcHandlers()
+  setupEmbedSessionAdBlocker()
   createWindow()
   
   // Check for updates after window is ready (production only)
@@ -188,7 +515,7 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   stopProxyServer()
   closeDatabase()
 })
