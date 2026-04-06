@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Mode Themes ──────────────────────────────────────── */
+
+:root {
+  --color-accent: #6c5ce7;
+  --color-accent-hover: #7c6ff0;
+  --color-accent-light: #a29bfe;
+  --color-accent-dark: #5a4bd1;
+}
+
 @layer base {
   * {
     scrollbar-width: thin;
@@ -41,7 +50,9 @@
   }
 
   .anime-card:hover {
-    @apply ring-2 ring-accent/50 scale-[1.02];
+    @apply ring-2;
+    --tw-ring-color: var(--color-accent);
+    --tw-ring-opacity: 0.5;
   }
 
   .anime-card:hover .anime-card-overlay {
@@ -70,7 +81,7 @@
   .input-field {
     @apply w-full bg-dark-900 border border-dark-700 rounded-lg px-4 py-2.5
            text-white placeholder-dark-500 outline-none
-           focus:border-accent focus:ring-1 focus:ring-accent/50 transition-all;
+           focus:border-accent focus:ring-1 transition-all;
   }
 
   .progress-bar {
