@@ -1,10 +1,18 @@
-import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js'
+import initSqlJs, { type Database as SqlJsDatabase, type SqlJsStatic } from 'sql.js'
 import { app } from 'electron'
-import { join } from 'path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { join, dirname } from 'path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  copyFileSync
+} from 'fs'
 
 let db: SqlJsDatabase
 let dbPath: string
+let backupPath: string
 let saveTimer: ReturnType<typeof setInterval> | null = null
 
 export async function initDatabase(): Promise<void> {
@@ -16,24 +24,88 @@ export async function initDatabase(): Promise<void> {
   }
 
   dbPath = join(dbDir, 'anime-watch.db')
+  backupPath = `${dbPath}.bak`
 
   const SQL = await initSqlJs()
 
-  if (existsSync(dbPath)) {
-    const buffer = readFileSync(dbPath)
-    db = new SQL.Database(buffer)
-  } else {
-    db = new SQL.Database()
-  }
+  // Recover a library that may live under a previous app name (e.g. "StreamWatch").
+  migrateLegacyData(userDataPath)
+
+  db = loadDatabase(SQL)
 
   createTables()
   migrateDubCache()
-  persistToFile()
+  persistToFile() // write schema to disk atomically
+  writeBackup() // snapshot the known-good state
 
-  // Auto-save every 30 seconds
-  saveTimer = setInterval(persistToFile, 30_000)
+  // Auto-save and refresh the backup every 30 seconds.
+  saveTimer = setInterval(() => {
+    persistToFile()
+    writeBackup()
+  }, 30_000)
 
   console.log(`[Database] Initialized at ${dbPath}`)
+}
+
+// If the current database is missing but an older one exists under a previous
+// app name, copy it across so the user's library survives the rename.
+function migrateLegacyData(userDataPath: string): void {
+  if (existsSync(dbPath)) return
+  const appSupport = dirname(userDataPath)
+  const legacyPaths = [join(appSupport, 'StreamWatch', 'data', 'anime-watch.db')]
+
+  for (const legacy of legacyPaths) {
+    try {
+      if (existsSync(legacy) && readFileSync(legacy).length > 0) {
+        copyFileSync(legacy, dbPath)
+        console.log(`[Database] Migrated library from legacy location: ${legacy}`)
+        return
+      }
+    } catch (err) {
+      console.warn('[Database] Legacy migration failed:', err)
+    }
+  }
+}
+
+// Open a database file only if it is present, non-empty, and a valid SQLite file.
+// Returns null when the file is absent; throws when the file exists but is corrupt.
+function openValidated(SQL: SqlJsStatic, file: string): SqlJsDatabase | null {
+  if (!existsSync(file)) return null
+  const buffer = readFileSync(file)
+  if (buffer.length === 0) return null
+  const candidate = new SQL.Database(buffer)
+  candidate.exec('PRAGMA schema_version') // throws if the buffer is not a real SQLite db
+  return candidate
+}
+
+// Load the database with fallbacks: primary file → backup → fresh. A corrupt
+// primary is preserved (renamed aside) rather than discarded, so nothing is
+// ever silently destroyed.
+function loadDatabase(SQL: SqlJsStatic): SqlJsDatabase {
+  try {
+    const main = openValidated(SQL, dbPath)
+    if (main) return main
+  } catch (err) {
+    console.error('[Database] Primary database is corrupt, trying backup:', err)
+    try {
+      renameSync(dbPath, `${dbPath}.corrupt-${Date.now()}`)
+    } catch {
+      /* ignore — we still try the backup below */
+    }
+  }
+
+  try {
+    const backup = openValidated(SQL, backupPath)
+    if (backup) {
+      console.warn('[Database] Recovered library from backup')
+      return backup
+    }
+  } catch (err) {
+    console.error('[Database] Backup database is also corrupt:', err)
+  }
+
+  console.warn('[Database] No valid database found — starting fresh')
+  return new SQL.Database()
 }
 
 function createTables(): void {
@@ -155,10 +227,31 @@ function migrateDubCache(): void {
   }
 }
 
+// Write atomically: serialise to a temp file, then rename over the target.
+// rename() is atomic on the same filesystem, so an interrupted write can never
+// leave a half-written (corrupt) database behind.
+function atomicWrite(file: string, data: Buffer): void {
+  const tmp = `${file}.tmp`
+  writeFileSync(tmp, data)
+  renameSync(tmp, file)
+}
+
 function persistToFile(): void {
   if (!db || !dbPath) return
-  const data = db.export()
-  writeFileSync(dbPath, Buffer.from(data))
+  try {
+    atomicWrite(dbPath, Buffer.from(db.export()))
+  } catch (err) {
+    console.error('[Database] Failed to save database:', err)
+  }
+}
+
+function writeBackup(): void {
+  if (!db || !backupPath) return
+  try {
+    atomicWrite(backupPath, Buffer.from(db.export()))
+  } catch (err) {
+    console.error('[Database] Failed to write backup:', err)
+  }
 }
 
 // ─── Query helpers ────────────────────────────────────────────
@@ -376,6 +469,7 @@ export function closeDatabase(): void {
   if (saveTimer) clearInterval(saveTimer)
   if (db) {
     persistToFile()
+    writeBackup()
     db.close()
   }
 }
@@ -534,6 +628,8 @@ export function toggleMediaEpisodeCompleted(
 const SETTING_DEFAULTS: Record<string, string> = {
   'accentColor': '#6c5ce7',
   'movieAccentColor': '#e50914',
+  'tmdbApiKey': '',
+  'customEmbedProviders': '[]',
   'popcornMirrors': 'https://fusme.link,https://jfper.link,https://uxert.link,https://yrkde.link',
   'torrentTimeout': '90',
   'maxTorrentConnections': '100',
@@ -563,4 +659,168 @@ export function getAllSettings(): Record<string, string> {
 
 export function resetSettings(): void {
   execute('DELETE FROM settings')
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXPORT / IMPORT  (library backup & restore)
+// ═══════════════════════════════════════════════════════════════
+
+export interface LibraryExport {
+  app: 'stream-watch'
+  version: number
+  exportedAt: string
+  anime: Record<string, unknown>[]
+  media: Record<string, unknown>[]
+  settings: Record<string, string>
+}
+
+export interface ImportResult {
+  anime: number
+  media: number
+  settings: number
+}
+
+// Serialise the full library to a portable structure keyed by natural ids
+// (anilist_id / tmdb_id) so it can be re-imported into any database.
+export function exportLibrary(): LibraryExport {
+  const anime = queryAll('SELECT * FROM anime ORDER BY added_at ASC').map((a) => ({
+    anilist_id: a.anilist_id,
+    title: a.title,
+    title_english: a.title_english,
+    cover_image: a.cover_image,
+    banner_image: a.banner_image,
+    description: a.description,
+    episodes_total: a.episodes_total,
+    status: a.status,
+    format: a.format,
+    genres: a.genres,
+    season: a.season,
+    season_year: a.season_year,
+    score: a.score,
+    progress: queryAll(
+      `SELECT episode_number, watched_seconds, total_seconds, completed, video_source
+       FROM watch_progress WHERE anime_id = ? ORDER BY episode_number ASC`,
+      [a.id]
+    )
+  }))
+
+  const media = queryAll('SELECT * FROM media ORDER BY added_at ASC').map((m) => ({
+    tmdb_id: m.tmdb_id,
+    media_type: m.media_type,
+    title: m.title,
+    poster_path: m.poster_path,
+    backdrop_path: m.backdrop_path,
+    overview: m.overview,
+    release_date: m.release_date,
+    vote_average: m.vote_average,
+    genres: m.genres,
+    runtime: m.runtime,
+    number_of_seasons: m.number_of_seasons,
+    number_of_episodes: m.number_of_episodes,
+    status: m.status,
+    progress: queryAll(
+      `SELECT season_number, episode_number, watched_seconds, total_seconds, completed
+       FROM media_watch_progress WHERE media_id = ? ORDER BY season_number ASC, episode_number ASC`,
+      [m.id]
+    )
+  }))
+
+  const settings: Record<string, string> = {}
+  for (const row of queryAll('SELECT key, value FROM settings')) {
+    settings[row.key as string] = row.value as string
+  }
+
+  return {
+    app: 'stream-watch',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    anime,
+    media,
+    settings
+  }
+}
+
+// Merge an exported library into the current database. Existing entries are
+// updated (matched on natural id); nothing is deleted, so importing is additive
+// and safe to run against a populated library.
+export function importLibrary(
+  data: LibraryExport,
+  opts: { includeSettings?: boolean } = {}
+): ImportResult {
+  if (!data || typeof data !== 'object' || (data.app && data.app !== 'stream-watch')) {
+    throw new Error('This file is not a valid StreamWatch library export.')
+  }
+
+  let animeCount = 0
+  for (const a of data.anime ?? []) {
+    addAnime({
+      anilistId: a.anilist_id,
+      title: a.title,
+      titleEnglish: a.title_english,
+      coverImage: a.cover_image,
+      bannerImage: a.banner_image,
+      description: a.description,
+      episodesTotal: a.episodes_total,
+      status: a.status,
+      format: a.format,
+      genres: a.genres,
+      season: a.season,
+      seasonYear: a.season_year,
+      score: a.score
+    })
+    for (const p of (a.progress as Record<string, unknown>[]) ?? []) {
+      saveProgress({
+        anilistId: a.anilist_id,
+        episodeNumber: p.episode_number,
+        watchedSeconds: p.watched_seconds,
+        totalSeconds: p.total_seconds,
+        completed: p.completed,
+        videoSource: p.video_source
+      })
+    }
+    animeCount++
+  }
+
+  let mediaCount = 0
+  for (const m of data.media ?? []) {
+    addMedia({
+      tmdbId: m.tmdb_id,
+      mediaType: m.media_type,
+      title: m.title,
+      posterPath: m.poster_path,
+      backdropPath: m.backdrop_path,
+      overview: m.overview,
+      releaseDate: m.release_date,
+      voteAverage: m.vote_average,
+      genres: m.genres,
+      runtime: m.runtime,
+      numberOfSeasons: m.number_of_seasons,
+      numberOfEpisodes: m.number_of_episodes,
+      status: m.status
+    })
+    for (const p of (m.progress as Record<string, unknown>[]) ?? []) {
+      saveMediaProgress({
+        tmdbId: m.tmdb_id,
+        mediaType: m.media_type,
+        seasonNumber: p.season_number ?? null,
+        episodeNumber: p.episode_number ?? null,
+        watchedSeconds: p.watched_seconds,
+        totalSeconds: p.total_seconds,
+        completed: p.completed
+      })
+    }
+    mediaCount++
+  }
+
+  let settingsCount = 0
+  if (opts.includeSettings && data.settings) {
+    for (const [key, value] of Object.entries(data.settings)) {
+      setSetting(key, String(value))
+      settingsCount++
+    }
+  }
+
+  persistToFile()
+  writeBackup()
+  return { anime: animeCount, media: mediaCount, settings: settingsCount }
 }

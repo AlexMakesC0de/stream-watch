@@ -1,8 +1,54 @@
 import type { TMDBMovie, TMDBTvShow, TMDBPage, TMDBMediaItem, TMDBSeason } from '@/types'
 
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY as string
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 export const TMDB_IMG = 'https://image.tmdb.org/t/p'
+
+// ─── API key (runtime, user-configurable) ────────────────────
+// The key is read from user settings at runtime — never baked into the build.
+// A build-time env var is only used as a development fallback.
+
+let cachedApiKey: string | null = null
+let apiKeyPromise: Promise<string> | null = null
+
+async function getApiKey(): Promise<string> {
+  if (cachedApiKey !== null) return cachedApiKey
+  if (!apiKeyPromise) {
+    apiKeyPromise = (async () => {
+      let key = ''
+      try {
+        key = (await window.api.getSetting('tmdbApiKey'))?.trim() || ''
+      } catch {
+        /* settings bridge unavailable */
+      }
+      // Development-only convenience fallback. `import.meta.env.DEV` is
+      // statically false in production, so this branch (and the inlined env
+      // value) is stripped from release builds — the key is never bundled.
+      if (!key && import.meta.env.DEV) {
+        key = (import.meta.env.VITE_TMDB_API_KEY as string | undefined)?.trim() || ''
+      }
+      cachedApiKey = key
+      return key
+    })()
+  }
+  return apiKeyPromise
+}
+
+// Apply a new key immediately (called from Settings) — avoids needing a restart.
+export function setTmdbApiKey(key: string): void {
+  cachedApiKey = key.trim()
+  apiKeyPromise = null
+}
+
+export async function isTmdbApiKeyConfigured(): Promise<boolean> {
+  return (await getApiKey()).length > 0
+}
+
+export class TmdbApiKeyMissingError extends Error {
+  constructor() {
+    super('TMDB API key not configured')
+    this.name = 'TmdbApiKeyMissingError'
+  }
+}
 
 // ─── In-memory cache ─────────────────────────────────────────
 
@@ -31,8 +77,11 @@ function setCache<T>(key: string, data: T, ttl = DEFAULT_TTL): void {
 // ─── Fetch helper ────────────────────────────────────────────
 
 async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+  const apiKey = await getApiKey()
+  if (!apiKey) throw new TmdbApiKeyMissingError()
+
   const url = new URL(`${TMDB_BASE}${path}`)
-  url.searchParams.set('api_key', TMDB_API_KEY)
+  url.searchParams.set('api_key', apiKey)
   url.searchParams.set('language', 'en-US')
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v)
@@ -59,6 +108,68 @@ async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): 
   }
 
   throw new Error('TMDB API: max retries exceeded')
+}
+
+// ─── Genre id → name ─────────────────────────────────────────
+// Stable TMDB genre ids (movie + TV combined).
+
+const GENRE_NAMES: Record<number, string> = {
+  28: 'Action',
+  12: 'Adventure',
+  16: 'Animation',
+  35: 'Comedy',
+  80: 'Crime',
+  99: 'Documentary',
+  18: 'Drama',
+  10751: 'Family',
+  14: 'Fantasy',
+  36: 'History',
+  27: 'Horror',
+  10402: 'Music',
+  9648: 'Mystery',
+  10749: 'Romance',
+  878: 'Science Fiction',
+  10770: 'TV Movie',
+  53: 'Thriller',
+  10752: 'War',
+  37: 'Western',
+  10759: 'Action & Adventure',
+  10762: 'Kids',
+  10763: 'News',
+  10764: 'Reality',
+  10765: 'Sci-Fi & Fantasy',
+  10766: 'Soap',
+  10767: 'Talk',
+  10768: 'War & Politics'
+}
+
+export function genreNames(ids: number[] | undefined, limit = 3): string[] {
+  if (!ids) return []
+  return ids.map((id) => GENRE_NAMES[id]).filter(Boolean).slice(0, limit)
+}
+
+// ─── Discover by streaming provider ──────────────────────────
+// `providerIds` is a TMDB-style pipe-joined list (e.g. "8" or "1899|384").
+
+export async function discoverByWatchProvider(
+  providerIds: string,
+  region: string,
+  page = 1
+): Promise<TMDBPage<TMDBMovie>> {
+  const key = `provider:${providerIds}:${region}:${page}`
+  const cached = getCached<TMDBPage<TMDBMovie>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBMovie>>('/discover/movie', {
+    with_watch_providers: providerIds,
+    watch_region: region,
+    with_watch_monetization_types: 'flatrate',
+    sort_by: 'popularity.desc',
+    'vote_count.gte': '40',
+    page: String(page)
+  })
+  setCache(key, data)
+  return data
 }
 
 // ─── Image URL helpers ───────────────────────────────────────
@@ -120,6 +231,76 @@ export async function getPopularTvShows(page = 1): Promise<TMDBPage<TMDBTvShow>>
   if (cached) return cached
 
   const data = await tmdbFetch<TMDBPage<TMDBTvShow>>('/tv/popular', { page: String(page) })
+  setCache(key, data)
+  return data
+}
+
+// ─── Now Playing / Upcoming / On The Air ─────────────────────
+
+export async function getNowPlayingMovies(page = 1): Promise<TMDBPage<TMDBMovie>> {
+  const key = `nowplaying:movie:${page}`
+  const cached = getCached<TMDBPage<TMDBMovie>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBMovie>>('/movie/now_playing', { page: String(page) })
+  setCache(key, data)
+  return data
+}
+
+export async function getUpcomingMovies(page = 1): Promise<TMDBPage<TMDBMovie>> {
+  const key = `upcoming:movie:${page}`
+  const cached = getCached<TMDBPage<TMDBMovie>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBMovie>>('/movie/upcoming', { page: String(page) })
+  setCache(key, data)
+  return data
+}
+
+export async function getOnTheAirTvShows(page = 1): Promise<TMDBPage<TMDBTvShow>> {
+  const key = `ontheair:tv:${page}`
+  const cached = getCached<TMDBPage<TMDBTvShow>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBTvShow>>('/tv/on_the_air', { page: String(page) })
+  setCache(key, data)
+  return data
+}
+
+// ─── Discover by genre ───────────────────────────────────────
+
+export async function discoverMoviesByGenre(
+  genreId: number,
+  page = 1
+): Promise<TMDBPage<TMDBMovie>> {
+  const key = `discover:movie:${genreId}:${page}`
+  const cached = getCached<TMDBPage<TMDBMovie>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBMovie>>('/discover/movie', {
+    with_genres: String(genreId),
+    sort_by: 'popularity.desc',
+    'vote_count.gte': '100',
+    page: String(page)
+  })
+  setCache(key, data)
+  return data
+}
+
+export async function discoverTvByGenre(
+  genreId: number,
+  page = 1
+): Promise<TMDBPage<TMDBTvShow>> {
+  const key = `discover:tv:${genreId}:${page}`
+  const cached = getCached<TMDBPage<TMDBTvShow>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBTvShow>>('/discover/tv', {
+    with_genres: String(genreId),
+    sort_by: 'popularity.desc',
+    'vote_count.gte': '100',
+    page: String(page)
+  })
   setCache(key, data)
   return data
 }

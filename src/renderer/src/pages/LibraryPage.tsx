@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Library,
@@ -10,7 +10,10 @@ import {
   Trash2,
   MoreVertical
 } from 'lucide-react'
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import type { LocalAnime, WatchStatus, EpisodeProgress } from '@/types'
+
+const PAGE_SIZE = 24
 
 const STATUS_CONFIG: Record<
   string,
@@ -44,13 +47,24 @@ export default function LibraryPage(): JSX.Element {
   const [library, setLibrary] = useState<LocalAnime[]>([])
   const [progressMap, setProgressMap] = useState<Record<number, EpisodeProgress[]>>({})
   const [loading, setLoading] = useState(true)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     loadLibrary()
   }, [status])
 
+  const loadMore = useCallback(() => {
+    setVisibleCount((c) => c + PAGE_SIZE)
+  }, [])
+
+  const sentinelRef = useInfiniteScroll(loadMore, {
+    hasMore: visibleCount < library.length,
+    loading
+  })
+
   async function loadLibrary(): Promise<void> {
     setLoading(true)
+    setVisibleCount(PAGE_SIZE)
     try {
       const data = (await window.api.getLibrary(status)) as LocalAnime[]
       setLibrary(data)
@@ -127,7 +141,7 @@ export default function LibraryPage(): JSX.Element {
         </div>
       ) : (
         <div className="space-y-2">
-          {library.map((anime) => {
+          {library.slice(0, visibleCount).map((anime) => {
             const statusInfo = STATUS_CONFIG[anime.status]
             const episodesWatched = getEpisodesWatched(anime.anilist_id)
 
@@ -195,6 +209,7 @@ export default function LibraryPage(): JSX.Element {
               </div>
             )
           })}
+          {visibleCount < library.length && <div ref={sentinelRef} className="h-1" />}
         </div>
       )}
     </div>

@@ -1,21 +1,52 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, SlidersHorizontal } from 'lucide-react'
+import { Search } from 'lucide-react'
 import AnimeGrid from '@/components/AnimeGrid'
 import { searchAnime, getTrendingAnime } from '@/services/anilist'
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import type { AniListAnime } from '@/types'
+
+const PER_PAGE = 24
 
 export default function SearchPage(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState(searchParams.get('q') || '')
+
   const [results, setResults] = useState<AniListAnime[]>([])
+  const [resultsPage, setResultsPage] = useState(1)
+  const [resultsHasNext, setResultsHasNext] = useState(false)
+
+  const [trendingAnime, setTrendingAnime] = useState<AniListAnime[]>([])
+  const [trendingPage, setTrendingPage] = useState(1)
+  const [trendingHasNext, setTrendingHasNext] = useState(false)
+
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
-  const [defaultAnime, setDefaultAnime] = useState<AniListAnime[]>([])
+
+  const activeQuery = searchParams.get('q') || ''
 
   useEffect(() => {
-    // Load trending as default content
-    getTrendingAnime(1, 24).then((res) => setDefaultAnime(res.media))
+    getTrendingAnime(1, PER_PAGE).then((res) => {
+      setTrendingAnime(res.media)
+      setTrendingHasNext(res.pageInfo.hasNextPage)
+    })
+  }, [])
+
+  const performSearch = useCallback(async (searchQuery: string): Promise<void> => {
+    if (!searchQuery.trim()) return
+    setLoading(true)
+    setHasSearched(true)
+    try {
+      const data = await searchAnime(searchQuery.trim(), 1, PER_PAGE)
+      setResults(data.media)
+      setResultsPage(1)
+      setResultsHasNext(data.pageInfo.hasNextPage)
+    } catch (error) {
+      console.error('Search failed:', error)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   // Auto-search when URL params change
@@ -24,30 +55,44 @@ export default function SearchPage(): JSX.Element {
     if (q) {
       setQuery(q)
       performSearch(q)
+    } else {
+      setHasSearched(false)
+      setResults([])
     }
-  }, [searchParams])
-
-  const performSearch = useCallback(async (searchQuery: string): Promise<void> => {
-    if (!searchQuery.trim()) return
-
-    setLoading(true)
-    setHasSearched(true)
-    try {
-      const data = await searchAnime(searchQuery.trim(), 1, 30)
-      setResults(data.media)
-    } catch (error) {
-      console.error('Search failed:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  }, [searchParams, performSearch])
 
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault()
-    if (query.trim()) {
-      setSearchParams({ q: query.trim() })
-    }
+    if (query.trim()) setSearchParams({ q: query.trim() })
   }
+
+  const hasMore = hasSearched ? resultsHasNext : trendingHasNext
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || loading) return
+    setLoadingMore(true)
+    try {
+      if (hasSearched) {
+        const next = resultsPage + 1
+        const data = await searchAnime(activeQuery.trim(), next, PER_PAGE)
+        setResults((prev) => [...prev, ...data.media])
+        setResultsPage(next)
+        setResultsHasNext(data.pageInfo.hasNextPage)
+      } else {
+        const next = trendingPage + 1
+        const data = await getTrendingAnime(next, PER_PAGE)
+        setTrendingAnime((prev) => [...prev, ...data.media])
+        setTrendingPage(next)
+        setTrendingHasNext(data.pageInfo.hasNextPage)
+      }
+    } catch (error) {
+      console.error('Load more failed:', error)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [loadingMore, loading, hasSearched, resultsPage, trendingPage, activeQuery])
+
+  const sentinelRef = useInfiniteScroll(loadMore, { hasMore, loading: loadingMore || loading })
 
   return (
     <div className="p-6">
@@ -71,15 +116,23 @@ export default function SearchPage(): JSX.Element {
         <AnimeGrid
           anime={results}
           loading={loading}
-          title={`Results for "${searchParams.get('q')}"`}
+          title={`Results for "${activeQuery}"`}
           emptyMessage="No anime found. Try a different search term."
         />
       ) : (
         <AnimeGrid
-          anime={defaultAnime}
+          anime={trendingAnime}
           title="Trending Anime"
-          loading={defaultAnime.length === 0}
+          loading={trendingAnime.length === 0}
         />
+      )}
+
+      {/* Infinite-scroll sentinel + loader */}
+      {hasMore && <div ref={sentinelRef} className="h-1" />}
+      {loadingMore && (
+        <div className="flex justify-center py-6">
+          <div className="animate-spin w-7 h-7 border-2 border-accent border-t-transparent rounded-full" />
+        </div>
       )}
     </div>
   )

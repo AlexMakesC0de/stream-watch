@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /// <reference types="@electron-toolkit/preload" />
 
 import type { ElectronAPI } from '@electron-toolkit/preload'
@@ -59,6 +60,20 @@ interface AnimeWatchAPI {
   setSetting: (key: string, value: string) => Promise<void>
   getAllSettings: () => Promise<Record<string, string>>
   resetSettings: () => Promise<void>
+  // Library Backup
+  exportLibrary: () => Promise<{
+    success: boolean
+    canceled?: boolean
+    path?: string
+    counts?: { anime: number; media: number }
+    error?: string
+  }>
+  importLibrary: (includeSettings: boolean) => Promise<{
+    success: boolean
+    canceled?: boolean
+    counts?: { anime: number; media: number; settings: number }
+    error?: string
+  }>
 }
 
 declare global {

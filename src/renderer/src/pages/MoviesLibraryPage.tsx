@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Library,
@@ -12,7 +12,10 @@ import {
   Tv
 } from 'lucide-react'
 import { posterUrl } from '@/services/tmdb'
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import type { LocalMedia, WatchStatus, MediaEpisodeProgress } from '@/types'
+
+const PAGE_SIZE = 24
 
 const STATUS_CONFIG: Record<
   string,
@@ -46,13 +49,24 @@ export default function MoviesLibraryPage(): JSX.Element {
   const [library, setLibrary] = useState<LocalMedia[]>([])
   const [progressMap, setProgressMap] = useState<Record<string, MediaEpisodeProgress[]>>({})
   const [loading, setLoading] = useState(true)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     loadLibrary()
   }, [status])
 
+  const loadMore = useCallback(() => {
+    setVisibleCount((c) => c + PAGE_SIZE)
+  }, [])
+
+  const sentinelRef = useInfiniteScroll(loadMore, {
+    hasMore: visibleCount < library.length,
+    loading
+  })
+
   async function loadLibrary(): Promise<void> {
     setLoading(true)
+    setVisibleCount(PAGE_SIZE)
     try {
       const data = (await window.api.getMediaLibrary(status)) as LocalMedia[]
       setLibrary(data)
@@ -137,7 +151,7 @@ export default function MoviesLibraryPage(): JSX.Element {
         </div>
       ) : (
         <div className="space-y-2">
-          {library.map((item) => {
+          {library.slice(0, visibleCount).map((item) => {
             const statusInfo = STATUS_CONFIG[item.status]
             const watched = getEpisodesWatched(item.tmdb_id, item.media_type)
             const total = item.media_type === 'tv' ? item.number_of_episodes : 1
@@ -203,6 +217,7 @@ export default function MoviesLibraryPage(): JSX.Element {
               </div>
             )
           })}
+          {visibleCount < library.length && <div ref={sentinelRef} className="h-1" />}
         </div>
       )}
     </div>

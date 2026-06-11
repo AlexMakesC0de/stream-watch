@@ -1,20 +1,31 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, TrendingUp, Star, Calendar, RefreshCw } from 'lucide-react'
-import AnimeGrid from '@/components/AnimeGrid'
 import {
-  getTrendingAnime,
-  getPopularAnime,
-  getSeasonAnime,
-  getCurrentSeason
-} from '@/services/anilist'
+  Play,
+  TrendingUp,
+  Star,
+  Calendar,
+  CalendarClock,
+  Flame,
+  Award,
+  Film,
+  RefreshCw
+} from 'lucide-react'
+import AnimeGrid from '@/components/AnimeGrid'
+import { getAnimeDiscover, getCurrentSeason, getNextSeason } from '@/services/anilist'
 import type { AniListAnime, ContinueWatchingItem } from '@/types'
+
+const seasonLabel = (s: { season: string; year: number }): string =>
+  `${s.season.charAt(0) + s.season.slice(1).toLowerCase()} ${s.year}`
 
 export default function HomePage(): JSX.Element {
   const navigate = useNavigate()
   const [trending, setTrending] = useState<AniListAnime[]>([])
-  const [popular, setPopular] = useState<AniListAnime[]>([])
   const [seasonal, setSeasonal] = useState<AniListAnime[]>([])
+  const [upcoming, setUpcoming] = useState<AniListAnime[]>([])
+  const [popular, setPopular] = useState<AniListAnime[]>([])
+  const [topRated, setTopRated] = useState<AniListAnime[]>([])
+  const [movies, setMovies] = useState<AniListAnime[]>([])
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
@@ -24,44 +35,26 @@ export default function HomePage(): JSX.Element {
   }, [])
 
   async function loadData(): Promise<void> {
-    // Only show loading skeletons on initial load (when no data yet)
-    const isInitial = trending.length === 0 && popular.length === 0 && seasonal.length === 0
+    const isInitial = trending.length === 0 && popular.length === 0
     if (isInitial) setLoading(true)
     setLoadError(false)
 
-    const { season, year } = getCurrentSeason()
-
-    // Use allSettled so one failure doesn't nuke the rest
-    const [trendingRes, popularRes, seasonalRes, continueRes] = await Promise.allSettled([
-      getTrendingAnime(1, 12),
-      getPopularAnime(1, 12),
-      getSeasonAnime(season, year, 1, 12),
+    const [discoverRes, continueRes] = await Promise.allSettled([
+      getAnimeDiscover(18),
       window.api.getContinueWatching()
     ])
 
-    let anyFailed = false
-
-    // Only update state if the fetch succeeded — preserve existing data on failure
-    // so the user doesn't lose what's already on screen
-    if (trendingRes.status === 'fulfilled') {
-      setTrending(trendingRes.value.media)
+    if (discoverRes.status === 'fulfilled') {
+      const d = discoverRes.value
+      setTrending(d.trending)
+      setSeasonal(d.seasonal)
+      setUpcoming(d.upcoming)
+      setPopular(d.popular)
+      setTopRated(d.topRated)
+      setMovies(d.movies)
     } else {
-      console.error('Failed to load trending:', trendingRes.reason)
-      anyFailed = true
-    }
-
-    if (popularRes.status === 'fulfilled') {
-      setPopular(popularRes.value.media)
-    } else {
-      console.error('Failed to load popular:', popularRes.reason)
-      anyFailed = true
-    }
-
-    if (seasonalRes.status === 'fulfilled') {
-      setSeasonal(seasonalRes.value.media)
-    } else {
-      console.error('Failed to load seasonal:', seasonalRes.reason)
-      anyFailed = true
+      console.error('Failed to load discover sections:', discoverRes.reason)
+      setLoadError(true)
     }
 
     if (continueRes.status === 'fulfilled') {
@@ -70,10 +63,6 @@ export default function HomePage(): JSX.Element {
       console.error('Failed to load continue watching:', continueRes.reason)
     }
 
-    // If everything failed and we already have data, keep showing it
-    // (don't flash loading skeletons over existing content)
-
-    setLoadError(anyFailed)
     setLoading(false)
   }
 
@@ -82,6 +71,15 @@ export default function HomePage(): JSX.Element {
     const s = Math.floor(seconds % 60)
     return `${m}:${s.toString().padStart(2, '0')}`
   }
+
+  const sections: { icon: JSX.Element; title: string; data: AniListAnime[] }[] = [
+    { icon: <TrendingUp size={20} className="text-accent" />, title: 'Trending Now', data: trending },
+    { icon: <Calendar size={20} className="text-accent" />, title: seasonLabel(getCurrentSeason()), data: seasonal },
+    { icon: <CalendarClock size={20} className="text-accent" />, title: `Upcoming — ${seasonLabel(getNextSeason())}`, data: upcoming },
+    { icon: <Flame size={20} className="text-accent" />, title: 'All-Time Popular', data: popular },
+    { icon: <Award size={20} className="text-accent" />, title: 'Top Rated', data: topRated },
+    { icon: <Film size={20} className="text-accent" />, title: 'Anime Movies', data: movies }
+  ]
 
   return (
     <div className="p-6 space-y-8">
@@ -144,35 +142,16 @@ export default function HomePage(): JSX.Element {
         </section>
       )}
 
-      {/* Trending */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <TrendingUp size={20} className="text-accent" />
-          <h2 className="text-xl font-bold text-white">Trending Now</h2>
-        </div>
-        <AnimeGrid anime={trending} loading={loading} />
-      </section>
-
-      {/* This Season */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Calendar size={20} className="text-accent" />
-          <h2 className="text-xl font-bold text-white">
-            {getCurrentSeason().season.charAt(0) + getCurrentSeason().season.slice(1).toLowerCase()}{' '}
-            {getCurrentSeason().year}
-          </h2>
-        </div>
-        <AnimeGrid anime={seasonal} loading={loading} />
-      </section>
-
-      {/* All-Time Popular */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Star size={20} className="text-accent" />
-          <h2 className="text-xl font-bold text-white">All-Time Popular</h2>
-        </div>
-        <AnimeGrid anime={popular} loading={loading} />
-      </section>
+      {/* Discover sections */}
+      {sections.map((section) => (
+        <section key={section.title}>
+          <div className="flex items-center gap-2 mb-4">
+            {section.icon}
+            <h2 className="text-xl font-bold text-white">{section.title}</h2>
+          </div>
+          <AnimeGrid anime={section.data} loading={loading} />
+        </section>
+      ))}
     </div>
   )
 }

@@ -86,7 +86,8 @@ export default function MoviesWatchPage(): JSX.Element {
   const [episodeProgress, setEpisodeProgress] = useState<MediaEpisodeProgress[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Provider cycling
+  // Provider cycling — user-defined custom sources are prepended to the built-ins
+  const [providers, setProviders] = useState<EmbedProvider[]>(EMBED_PROVIDERS)
   const [providerIndex, setProviderIndex] = useState(0)
   const [embedUrl, setEmbedUrl] = useState('')
 
@@ -170,15 +171,39 @@ export default function MoviesWatchPage(): JSX.Element {
     }
   }, [tmdbId, mediaType, currentSeason])
 
+  /* -- Load user-defined custom streaming sources ------------------------ */
+  useEffect(() => {
+    window.api.getSetting('customEmbedProviders').then((raw) => {
+      if (!raw) return
+      try {
+        const custom = JSON.parse(raw) as Array<{ name: string; movie: string; tv: string }>
+        const mapped: EmbedProvider[] = custom
+          .filter((c) => c && c.name && c.movie && c.tv)
+          .map((c) => ({
+            name: c.name,
+            buildMovieUrl: (id) => c.movie.replace(/\{id\}/g, String(id)),
+            buildTvUrl: (id, s, e) =>
+              c.tv
+                .replace(/\{id\}/g, String(id))
+                .replace(/\{season\}/g, String(s))
+                .replace(/\{episode\}/g, String(e))
+          }))
+        if (mapped.length > 0) setProviders([...mapped, ...EMBED_PROVIDERS])
+      } catch {
+        /* malformed setting — keep built-in providers */
+      }
+    })
+  }, [])
+
   /* -- Build embed URL when provider / route changes --------------------- */
   useEffect(() => {
-    const provider = EMBED_PROVIDERS[providerIndex]
+    const provider = providers[providerIndex] ?? providers[0]
     const url =
       mediaType === 'movie'
         ? provider.buildMovieUrl(tmdbId)
         : provider.buildTvUrl(tmdbId, currentSeason, currentEpisode)
     setEmbedUrl(withAutoplay(url))
-  }, [providerIndex, tmdbId, mediaType, currentSeason, currentEpisode])
+  }, [providers, providerIndex, tmdbId, mediaType, currentSeason, currentEpisode])
 
   /* -- Load season sidebar episodes -------------------------------------- */
   useEffect(() => {
@@ -195,7 +220,7 @@ export default function MoviesWatchPage(): JSX.Element {
 
   /* -- Provider cycling -------------------------------------------------- */
   function cycleProvider(): void {
-    setProviderIndex((prev) => (prev + 1) % EMBED_PROVIDERS.length)
+    setProviderIndex((prev) => (prev + 1) % providers.length)
   }
 
   /* -- Progress callbacks ------------------------------------------------ */
@@ -313,7 +338,7 @@ export default function MoviesWatchPage(): JSX.Element {
     (currentEpisode < maxEpCount ||
       tvShow?.seasons?.some((sv) => sv.season_number === currentSeason + 1))
 
-  const providerName = EMBED_PROVIDERS[providerIndex].name
+  const providerName = (providers[providerIndex] ?? providers[0])?.name ?? ''
 
   /* -- Render ------------------------------------------------------------ */
   return (

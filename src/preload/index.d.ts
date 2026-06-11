@@ -33,6 +33,21 @@ interface AnimeWatchAPI {
   getAllSettings: () => Promise<Record<string, string>>
   resetSettings: () => Promise<void>
 
+  // Library Backup
+  exportLibrary: () => Promise<{
+    success: boolean
+    canceled?: boolean
+    path?: string
+    counts?: { anime: number; media: number }
+    error?: string
+  }>
+  importLibrary: (includeSettings: boolean) => Promise<{
+    success: boolean
+    canceled?: boolean
+    counts?: { anime: number; media: number; settings: number }
+    error?: string
+  }>
+
   // Window
   minimizeWindow: () => void
   maximizeWindow: () => void

@@ -10,8 +10,6 @@ import {
   PauseCircle,
   XCircle,
   Bookmark,
-  Tv,
-  Film,
   ArrowLeftRight,
   LayoutGrid,
   Settings
@@ -146,10 +144,10 @@ export default function Sidebar(): JSX.Element {
         {/* Switch mode */}
         <button
           onClick={() => switchToMode(otherMode)}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap
                      text-dark-400 hover:bg-dark-900 hover:text-white transition-colors"
         >
-          {otherMode === 'movies' ? <Film size={16} /> : <Tv size={16} />}
+          <ArrowLeftRight size={16} className="shrink-0" />
           Switch to {otherMode === 'movies' ? 'Movies & TV' : 'Anime'}
         </button>
 

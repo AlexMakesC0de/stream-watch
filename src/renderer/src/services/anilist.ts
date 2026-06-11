@@ -219,6 +219,69 @@ export async function getSeasonAnime(
   return result
 }
 
+// ─── Discover (many sections in one request) ─────────────────
+// AniList rate-limits aggressively, so the home page pulls every category in a
+// single aliased query instead of firing one request per row.
+
+export interface AnimeDiscover {
+  trending: AniListAnime[]
+  popular: AniListAnime[]
+  topRated: AniListAnime[]
+  seasonal: AniListAnime[]
+  upcoming: AniListAnime[]
+  movies: AniListAnime[]
+}
+
+export async function getAnimeDiscover(perPage = 18): Promise<AnimeDiscover> {
+  const { season, year } = getCurrentSeason()
+  const next = getNextSeason()
+  const vars = {
+    perPage,
+    season,
+    seasonYear: year,
+    nextSeason: next.season,
+    nextYear: next.year
+  }
+  const key = makeCacheKey('discover', vars)
+  const cached = getCached<AnimeDiscover>(key)
+  if (cached) return cached
+
+  const gql = `
+    query ($perPage: Int, $season: MediaSeason, $seasonYear: Int, $nextSeason: MediaSeason, $nextYear: Int) {
+      trending: Page(perPage: $perPage) {
+        media(type: ANIME, sort: TRENDING_DESC) { ...AnimeFields }
+      }
+      seasonal: Page(perPage: $perPage) {
+        media(type: ANIME, season: $season, seasonYear: $seasonYear, sort: POPULARITY_DESC) { ...AnimeFields }
+      }
+      upcoming: Page(perPage: $perPage) {
+        media(type: ANIME, season: $nextSeason, seasonYear: $nextYear, sort: POPULARITY_DESC) { ...AnimeFields }
+      }
+      popular: Page(perPage: $perPage) {
+        media(type: ANIME, sort: POPULARITY_DESC) { ...AnimeFields }
+      }
+      topRated: Page(perPage: $perPage) {
+        media(type: ANIME, sort: SCORE_DESC) { ...AnimeFields }
+      }
+      movies: Page(perPage: $perPage) {
+        media(type: ANIME, format: MOVIE, sort: POPULARITY_DESC) { ...AnimeFields }
+      }
+    }
+    ${ANIME_FRAGMENT}
+  `
+  const data = await anilistQuery<Record<string, { media: AniListAnime[] }>>(gql, vars)
+  const result: AnimeDiscover = {
+    trending: data.trending?.media ?? [],
+    popular: data.popular?.media ?? [],
+    topRated: data.topRated?.media ?? [],
+    seasonal: data.seasonal?.media ?? [],
+    upcoming: data.upcoming?.media ?? [],
+    movies: data.movies?.media ?? []
+  }
+  setCache(key, result)
+  return result
+}
+
 // ─── Anime Details ───────────────────────────────────────────
 
 export async function getAnimeDetails(id: number): Promise<AniListAnime> {
@@ -254,6 +317,13 @@ export function getCurrentSeason(): { season: string; year: number } {
   else season = 'FALL'
 
   return { season, year }
+}
+
+export function getNextSeason(): { season: string; year: number } {
+  const order = ['WINTER', 'SPRING', 'SUMMER', 'FALL']
+  const { season, year } = getCurrentSeason()
+  const idx = order.indexOf(season)
+  return idx === 3 ? { season: 'WINTER', year: year + 1 } : { season: order[idx + 1], year }
 }
 
 export function stripHtml(html: string | null): string {

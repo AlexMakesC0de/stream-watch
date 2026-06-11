@@ -1,76 +1,109 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, TrendingUp, Star, Film, Tv, RefreshCw } from 'lucide-react'
-import MediaGrid from '@/components/MediaGrid'
+import {
+  Play,
+  Flame,
+  TrendingUp,
+  Film,
+  Tv,
+  Clapperboard,
+  Radio,
+  Award,
+  Swords,
+  Laugh,
+  Rocket,
+  Ghost,
+  Sparkles,
+  KeyRound,
+  type LucideIcon
+} from 'lucide-react'
+import HeroSlideshow from '@/components/HeroSlideshow'
+import LazyMediaRow from '@/components/LazyMediaRow'
+import ProviderRow from '@/components/ProviderRow'
 import {
   getTrending,
   getPopularMovies,
   getPopularTvShows,
   getTopRatedMovies,
-  posterUrl
+  getNowPlayingMovies,
+  getOnTheAirTvShows,
+  discoverMoviesByGenre,
+  posterUrl,
+  isTmdbApiKeyConfigured
 } from '@/services/tmdb'
-import type { TMDBMediaItem, TMDBMovie, TMDBTvShow, MediaContinueWatchingItem } from '@/types'
+import type {
+  TMDBMediaItem,
+  TMDBMovie,
+  TMDBTvShow,
+  MediaContinueWatchingItem
+} from '@/types'
+
+type AnyMedia = TMDBMovie | TMDBTvShow | TMDBMediaItem
+
+interface PageResult {
+  results: AnyMedia[]
+  page: number
+  total_pages: number
+}
+
+const GENRE = { action: 28, comedy: 35, sciFi: 878, horror: 27, animation: 16 }
+
+// Module-level fetchers → stable identity so rows don't reset on re-render.
+const fetchTrendingDay = (page: number): Promise<PageResult> => getTrending('all', 'day', page)
+
+interface RowDef {
+  key: string
+  title: string
+  Icon: LucideIcon
+  badge?: string
+  ranked?: boolean
+  maxItems?: number
+  fetchPage: (page: number) => Promise<PageResult>
+}
+
+const ROWS: RowDef[] = [
+  { key: 'top10', title: 'Today', Icon: Flame, badge: 'Top 10', ranked: true, maxItems: 10, fetchPage: fetchTrendingDay },
+  { key: 'trending', title: 'Trending Today', Icon: TrendingUp, fetchPage: fetchTrendingDay },
+  { key: 'popularMovies', title: 'Popular Movies', Icon: Film, fetchPage: getPopularMovies },
+  { key: 'popularTv', title: 'Popular TV Shows', Icon: Tv, fetchPage: getPopularTvShows },
+  { key: 'nowPlaying', title: 'Now Playing', Icon: Clapperboard, fetchPage: getNowPlayingMovies },
+  { key: 'onTheAir', title: 'On The Air', Icon: Radio, fetchPage: getOnTheAirTvShows },
+  { key: 'topRated', title: 'Top Rated', Icon: Award, fetchPage: getTopRatedMovies },
+  { key: 'action', title: 'Action', Icon: Swords, fetchPage: (p) => discoverMoviesByGenre(GENRE.action, p) },
+  { key: 'comedy', title: 'Comedy', Icon: Laugh, fetchPage: (p) => discoverMoviesByGenre(GENRE.comedy, p) },
+  { key: 'sciFi', title: 'Sci-Fi', Icon: Rocket, fetchPage: (p) => discoverMoviesByGenre(GENRE.sciFi, p) },
+  { key: 'horror', title: 'Horror', Icon: Ghost, fetchPage: (p) => discoverMoviesByGenre(GENRE.horror, p) },
+  { key: 'animation', title: 'Animation', Icon: Sparkles, fetchPage: (p) => discoverMoviesByGenre(GENRE.animation, p) }
+]
 
 export default function MoviesHomePage(): JSX.Element {
   const navigate = useNavigate()
-  const [trending, setTrending] = useState<TMDBMediaItem[]>([])
-  const [popularMovies, setPopularMovies] = useState<TMDBMovie[]>([])
-  const [popularTv, setPopularTv] = useState<TMDBTvShow[]>([])
-  const [topRated, setTopRated] = useState<TMDBMovie[]>([])
+  const [heroItems, setHeroItems] = useState<TMDBMediaItem[]>([])
   const [continueWatching, setContinueWatching] = useState<MediaContinueWatchingItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
+  const [keyMissing, setKeyMissing] = useState(false)
+  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     loadData()
   }, [])
 
   async function loadData(): Promise<void> {
-    const isInitial = trending.length === 0
-    if (isInitial) setLoading(true)
-    setLoadError(false)
+    setChecking(true)
+    const hasKey = await isTmdbApiKeyConfigured()
+    setKeyMissing(!hasKey)
 
-    const [trendingRes, popularMoviesRes, popularTvRes, topRatedRes, continueRes] =
-      await Promise.allSettled([
-        getTrending('all', 'week', 1),
-        getPopularMovies(1),
-        getPopularTvShows(1),
-        getTopRatedMovies(1),
-        window.api.getMediaContinueWatching()
-      ])
+    const continueRes = await window.api.getMediaContinueWatching().catch(() => [])
+    setContinueWatching(continueRes as MediaContinueWatchingItem[])
 
-    let anyFailed = false
-
-    if (trendingRes.status === 'fulfilled') {
-      setTrending(trendingRes.value.results.slice(0, 12))
-    } else {
-      anyFailed = true
+    if (hasKey) {
+      try {
+        const trending = await getTrending('all', 'day', 1)
+        setHeroItems(trending.results)
+      } catch {
+        setHeroItems([])
+      }
     }
-
-    if (popularMoviesRes.status === 'fulfilled') {
-      setPopularMovies(popularMoviesRes.value.results.slice(0, 12))
-    } else {
-      anyFailed = true
-    }
-
-    if (popularTvRes.status === 'fulfilled') {
-      setPopularTv(popularTvRes.value.results.slice(0, 12))
-    } else {
-      anyFailed = true
-    }
-
-    if (topRatedRes.status === 'fulfilled') {
-      setTopRated(topRatedRes.value.results.slice(0, 12))
-    } else {
-      anyFailed = true
-    }
-
-    if (continueRes.status === 'fulfilled') {
-      setContinueWatching(continueRes.value as MediaContinueWatchingItem[])
-    }
-
-    setLoadError(anyFailed)
-    setLoading(false)
+    setChecking(false)
   }
 
   const formatTime = (seconds: number): string => {
@@ -79,18 +112,30 @@ export default function MoviesHomePage(): JSX.Element {
     return `${m}:${s.toString().padStart(2, '0')}`
   }
 
-  return (
-    <div className="p-6 space-y-8">
-      {/* Error banner */}
-      {loadError && !loading && (
-        <div className="flex items-center justify-between bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
-          <p className="text-red-400 text-sm">Some sections failed to load. Check your internet connection.</p>
-          <button onClick={loadData} className="flex items-center gap-1.5 text-sm text-accent hover:text-accent/80 transition-colors">
-            <RefreshCw size={14} />
-            Retry
+  // No API key → prompt, don't render rows (they'd all fail).
+  if (keyMissing && !checking) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3">
+          <p className="text-amber-300 text-sm flex items-center gap-2">
+            <KeyRound size={15} />
+            Add your TMDB API key to load Movies &amp; TV.
+          </p>
+          <button
+            onClick={() => navigate('/movies/settings')}
+            className="text-sm text-accent hover:text-accent/80 transition-colors"
+          >
+            Open Settings
           </button>
         </div>
-      )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-6 space-y-8">
+      {/* Hero slideshow */}
+      <HeroSlideshow items={heroItems} />
 
       {/* Continue Watching */}
       {continueWatching.length > 0 && (
@@ -146,41 +191,26 @@ export default function MoviesHomePage(): JSX.Element {
         </section>
       )}
 
+      {/* Top 10 Today (ranked) */}
+      <LazyMediaRow
+        title={ROWS[0].title}
+        Icon={ROWS[0].Icon}
+        badge={ROWS[0].badge}
+        ranked={ROWS[0].ranked}
+        maxItems={ROWS[0].maxItems}
+        fetchPage={ROWS[0].fetchPage}
+      />
+
       {/* Trending */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <TrendingUp size={20} className="text-accent" />
-          <h2 className="text-xl font-bold text-white">Trending This Week</h2>
-        </div>
-        <MediaGrid media={trending} loading={loading} />
-      </section>
+      <LazyMediaRow title={ROWS[1].title} Icon={ROWS[1].Icon} fetchPage={ROWS[1].fetchPage} />
 
-      {/* Popular Movies */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Film size={20} className="text-accent" />
-          <h2 className="text-xl font-bold text-white">Popular Movies</h2>
-        </div>
-        <MediaGrid media={popularMovies} loading={loading} />
-      </section>
+      {/* Only on <provider> */}
+      <ProviderRow />
 
-      {/* Popular TV Shows */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Tv size={20} className="text-accent" />
-          <h2 className="text-xl font-bold text-white">Popular TV Shows</h2>
-        </div>
-        <MediaGrid media={popularTv} loading={loading} />
-      </section>
-
-      {/* Top Rated */}
-      <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Star size={20} className="text-accent" />
-          <h2 className="text-xl font-bold text-white">Top Rated Movies</h2>
-        </div>
-        <MediaGrid media={topRated} loading={loading} />
-      </section>
+      {/* Remaining rows */}
+      {ROWS.slice(2).map((row) => (
+        <LazyMediaRow key={row.key} title={row.title} Icon={row.Icon} fetchPage={row.fetchPage} />
+      ))}
     </div>
   )
 }

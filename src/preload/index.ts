@@ -67,6 +67,11 @@ const api = {
   getAllSettings: () => ipcRenderer.invoke('settings:get-all'),
   resetSettings: () => ipcRenderer.invoke('settings:reset'),
 
+  // ── Library Backup ─────────────────────────────
+  exportLibrary: () => ipcRenderer.invoke('library:export'),
+  importLibrary: (includeSettings: boolean) =>
+    ipcRenderer.invoke('library:import', includeSettings),
+
   // ── Auto Updater ───────────────────────────────
   onUpdateAvailable: (callback: (version: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, version: string): void => callback(version)

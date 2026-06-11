@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain, session } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, session, dialog } from 'electron'
 import { join } from 'path'
+import { readFileSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import {
@@ -30,10 +31,17 @@ import {
   getSetting,
   setSetting,
   getAllSettings,
-  resetSettings
+  resetSettings,
+  exportLibrary,
+  importLibrary
 } from './database'
 import { fetchEpisodeSources, type FetchEpisodeOpts } from './providers'
 import { startProxyServer, stopProxyServer } from './proxy'
+
+// Pin the app name so the userData directory (which holds the library database)
+// resolves to the same path across versions, platforms, and Electron upgrades.
+// Must run before any app.getPath('userData') call.
+app.setName('anime-watch')
 
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
@@ -201,6 +209,53 @@ function registerIpcHandlers(): void {
   ipcMain.handle('settings:set', (_event, key: string, value: string) => setSetting(key, value))
   ipcMain.handle('settings:get-all', () => getAllSettings())
   ipcMain.handle('settings:reset', () => resetSettings())
+
+  // ── Library Export / Import ───────────────────────────────
+  ipcMain.handle('library:export', async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+    const bundle = exportLibrary()
+    const stamp = new Date().toISOString().slice(0, 10)
+    const options = {
+      title: 'Export Library',
+      defaultPath: `streamwatch-library-${stamp}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    }
+    const result = win
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return { success: false, canceled: true }
+    try {
+      writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf-8')
+      return {
+        success: true,
+        path: result.filePath,
+        counts: { anime: bundle.anime.length, media: bundle.media.length }
+      }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('library:import', async (_event, includeSettings: boolean) => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+    const options = {
+      title: 'Import Library',
+      properties: ['openFile' as const],
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return { success: false, canceled: true }
+    try {
+      const raw = readFileSync(result.filePaths[0], 'utf-8')
+      const data = JSON.parse(raw)
+      const counts = importLibrary(data, { includeSettings: Boolean(includeSettings) })
+      return { success: true, counts }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    }
+  })
 }
 
 // ─── App Lifecycle ─────────────────────────────────────────────
