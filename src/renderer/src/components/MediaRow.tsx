@@ -93,7 +93,7 @@ export default function MediaRow({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x scroll-smooth"
+        className="flex gap-3 overflow-x-auto overflow-y-hidden py-2 -mx-2 px-2 snap-x scroll-smooth"
       >
         {showSkeleton
           ? Array.from({ length: 8 }).map((_, i) => (

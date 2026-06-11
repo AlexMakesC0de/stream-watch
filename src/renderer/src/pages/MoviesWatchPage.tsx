@@ -28,11 +28,19 @@ interface EmbedProvider {
   buildTvUrl: (tmdbId: number, season: number, episode: number) => string
 }
 
+// NOTE: free embed hosts rotate/disappear constantly. Keep only currently-live
+// domains here; dead ones are auto-skipped at runtime (see handleLoadError).
+// Users can also add their own under Settings → custom streaming sources.
 const EMBED_PROVIDERS: EmbedProvider[] = [
   {
-    name: 'VidSrc ICU',
-    buildMovieUrl: (id) => `https://vidsrc.icu/embed/movie/${id}`,
-    buildTvUrl: (id, s, e) => `https://vidsrc.icu/embed/tv/${id}/${s}/${e}`
+    name: 'Videasy',
+    buildMovieUrl: (id) => `https://player.videasy.net/movie/${id}`,
+    buildTvUrl: (id, s, e) => `https://player.videasy.net/tv/${id}/${s}/${e}`
+  },
+  {
+    name: 'VidLink',
+    buildMovieUrl: (id) => `https://vidlink.pro/movie/${id}`,
+    buildTvUrl: (id, s, e) => `https://vidlink.pro/tv/${id}/${s}/${e}`
   },
   {
     name: 'VidSrc CC',
@@ -40,14 +48,19 @@ const EMBED_PROVIDERS: EmbedProvider[] = [
     buildTvUrl: (id, s, e) => `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}`
   },
   {
-    name: 'Embed.su',
-    buildMovieUrl: (id) => `https://embed.su/embed/movie/${id}`,
-    buildTvUrl: (id, s, e) => `https://embed.su/embed/tv/${id}/${s}/${e}`
+    name: 'VidSrc SU',
+    buildMovieUrl: (id) => `https://vidsrc.su/embed/movie/${id}`,
+    buildTvUrl: (id, s, e) => `https://vidsrc.su/embed/tv/${id}/${s}/${e}`
   },
   {
-    name: 'AutoEmbed',
-    buildMovieUrl: (id) => `https://player.autoembed.cc/embed/movie/${id}`,
-    buildTvUrl: (id, s, e) => `https://player.autoembed.cc/embed/tv/${id}/${s}/${e}`
+    name: 'VidFast',
+    buildMovieUrl: (id) => `https://vidfast.pro/movie/${id}`,
+    buildTvUrl: (id, s, e) => `https://vidfast.pro/tv/${id}/${s}/${e}`
+  },
+  {
+    name: 'VidSrc TO',
+    buildMovieUrl: (id) => `https://vidsrc.to/embed/movie/${id}`,
+    buildTvUrl: (id, s, e) => `https://vidsrc.to/embed/tv/${id}/${s}/${e}`
   }
 ]
 
@@ -90,6 +103,9 @@ export default function MoviesWatchPage(): JSX.Element {
   const [providers, setProviders] = useState<EmbedProvider[]>(EMBED_PROVIDERS)
   const [providerIndex, setProviderIndex] = useState(0)
   const [embedUrl, setEmbedUrl] = useState('')
+  // Tracks sources that failed to load so we can auto-skip dead/blocked hosts
+  const triedProvidersRef = useRef<Set<number>>(new Set())
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Episode sidebar
   const [showEpisodes, setShowEpisodes] = useState(false)
@@ -203,7 +219,43 @@ export default function MoviesWatchPage(): JSX.Element {
         ? provider.buildMovieUrl(tmdbId)
         : provider.buildTvUrl(tmdbId, currentSeason, currentEpisode)
     setEmbedUrl(withAutoplay(url))
+    setLoadError(null) // fresh attempt — clear any previous failure message
   }, [providers, providerIndex, tmdbId, mediaType, currentSeason, currentEpisode])
+
+  /* -- Reset failure tracking when the title/episode changes ------------- */
+  useEffect(() => {
+    triedProvidersRef.current = new Set()
+  }, [tmdbId, mediaType, currentSeason, currentEpisode])
+
+  /* -- Auto-skip a source that fails to load ----------------------------- */
+  const handleLoadError = useCallback(() => {
+    const total = providers.length
+    triedProvidersRef.current.add(providerIndex)
+
+    // Find the next source we haven't already tried for this title
+    let next = -1
+    for (let step = 1; step <= total; step++) {
+      const idx = (providerIndex + step) % total
+      if (!triedProvidersRef.current.has(idx)) {
+        next = idx
+        break
+      }
+    }
+
+    if (next !== -1) {
+      setProviderIndex(next)
+    } else {
+      setLoadError(
+        'No source had a stream for this title. Free sources vary by title and region — a different title may work, or the same title may need a VPN to a region the sources serve (commonly US/EU). You can also add your own source in Settings.'
+      )
+    }
+  }, [providers.length, providerIndex])
+
+  const retryAllProviders = useCallback(() => {
+    triedProvidersRef.current = new Set()
+    setLoadError(null)
+    setProviderIndex(0)
+  }, [])
 
   /* -- Load season sidebar episodes -------------------------------------- */
   useEffect(() => {
@@ -218,9 +270,26 @@ export default function MoviesWatchPage(): JSX.Element {
     }
   }, [selectedSeason])
 
-  /* -- Provider cycling -------------------------------------------------- */
-  function cycleProvider(): void {
-    setProviderIndex((prev) => (prev + 1) % providers.length)
+  /* -- Back navigation --------------------------------------------------- */
+  // Return to wherever launched the player (detail page, Home, Continue
+  // Watching, …). Using navigate(-1) avoids pushing a *second* detail entry
+  // on top of the one already in history — which previously made the detail
+  // page's Back button need two presses. Fall back to the detail page only if
+  // there's genuinely no in-app history to pop.
+  function handleBack(): void {
+    if ((window.history.state?.idx ?? 0) > 0) {
+      navigate(-1)
+    } else {
+      navigate(`/movies/detail/${mediaType}/${tmdbId}`, { replace: true })
+    }
+  }
+
+  /* -- Provider selection ------------------------------------------------ */
+  function selectProvider(idx: number): void {
+    // Explicit user choice — start a fresh attempt from this source
+    triedProvidersRef.current = new Set()
+    setLoadError(null)
+    setProviderIndex(idx)
   }
 
   /* -- Progress callbacks ------------------------------------------------ */
@@ -338,8 +407,6 @@ export default function MoviesWatchPage(): JSX.Element {
     (currentEpisode < maxEpCount ||
       tvShow?.seasons?.some((sv) => sv.season_number === currentSeason + 1))
 
-  const providerName = (providers[providerIndex] ?? providers[0])?.name ?? ''
-
   /* -- Render ------------------------------------------------------------ */
   return (
     <div ref={pageRef} className="flex flex-col h-full bg-dark-950 relative theme-movies">
@@ -354,16 +421,13 @@ export default function MoviesWatchPage(): JSX.Element {
         onMouseEnter={handleBarActivity}
         onMouseMove={handleBarActivity}
         onMouseLeave={handleBarActivity}
-        className={`drag-region flex items-center justify-between px-4 py-2 bg-dark-900/90 backdrop-blur-sm border-b border-dark-800 shrink-0 absolute top-0 left-0 right-0 z-30 transition-all duration-300 ${isMac ? 'pl-20' : ''} ${
+        className={`drag-region flex items-center justify-between px-4 py-2 bg-dark-900/90 backdrop-blur-sm border-b border-dark-800 shrink-0 absolute top-0 left-0 right-0 z-50 transition-all duration-300 ${isMac && !isFullscreen ? 'pl-20' : ''} ${
           controlsVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'
         }`}
       >
         {/* Left: back + title */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`/movies/detail/${mediaType}/${tmdbId}`, { replace: true })}
-            className="no-drag btn-ghost text-sm"
-          >
+          <button onClick={handleBack} className="no-drag btn-ghost text-sm">
             <ArrowLeft size={16} />
             Back
           </button>
@@ -376,15 +440,29 @@ export default function MoviesWatchPage(): JSX.Element {
 
         {/* Right: controls */}
         <div className="flex items-center gap-2">
-          {/* Provider switcher */}
-          <button
-            onClick={cycleProvider}
-            className="no-drag flex items-center gap-1.5 bg-dark-800 text-white text-xs rounded px-2 py-1 border border-dark-700 hover:bg-dark-700 transition-colors"
-            title="Switch streaming provider"
-          >
-            <RefreshCw size={12} />
-            {providerName}
-          </button>
+          {/* Provider switcher — pick a source directly */}
+          <div className="no-drag relative flex items-center" title="Switch streaming source">
+            <RefreshCw
+              size={12}
+              className="absolute left-2 text-dark-400 pointer-events-none"
+            />
+            <select
+              value={providerIndex}
+              onChange={(e) => selectProvider(parseInt(e.target.value))}
+              className="appearance-none bg-dark-800 text-white text-xs rounded pl-7 pr-6 py-1
+                         border border-dark-700 hover:bg-dark-700 focus:outline-none cursor-pointer transition-colors"
+            >
+              {providers.map((p, i) => (
+                <option key={`${p.name}-${i}`} value={i}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              size={12}
+              className="absolute right-1.5 text-dark-400 pointer-events-none"
+            />
+          </div>
 
           {/* TV episode navigation */}
           {mediaType === 'tv' && (
@@ -462,17 +540,44 @@ export default function MoviesWatchPage(): JSX.Element {
             </div>
           )}
 
-          {/* Embed Player */}
-          {!loading && embedUrl && (
+          {/* Embed Player — remount per source so loading state resets cleanly */}
+          {!loading && embedUrl && !loadError && (
             <EmbedPlayer
+              key={embedUrl}
               src={embedUrl}
               title={`${title} ${episodeTitle}`}
               initialTime={initialTime}
               fullscreenTarget={pageRef as React.RefObject<HTMLElement>}
               onProgress={handleProgress}
               onEnded={handleEnded}
+              onLoadError={handleLoadError}
               onError={(msg) => console.error('[MoviesWatchPage] Embed error:', msg)}
             />
+          )}
+
+          {/* All sources failed to load */}
+          {!loading && loadError && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 bg-black px-8 text-center">
+              <div className="max-w-md space-y-2">
+                <p className="text-white text-base font-medium">Couldn’t load this title</p>
+                <p className="text-dark-400 text-sm leading-relaxed">{loadError}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={retryAllProviders}
+                  className="flex items-center gap-1.5 bg-accent text-white text-sm rounded px-3 py-1.5 hover:bg-accent-hover transition-colors"
+                >
+                  <RefreshCw size={14} />
+                  Retry
+                </button>
+                <button
+                  onClick={() => navigate('/movies/settings')}
+                  className="btn-ghost text-sm"
+                >
+                  Add a source
+                </button>
+              </div>
+            </div>
           )}
         </div>
 

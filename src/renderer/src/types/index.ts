@@ -132,6 +132,7 @@ export interface TMDBMovie {
   similar?: TMDBPage<TMDBMovie>
   recommendations?: TMDBPage<TMDBMovie>
   external_ids?: { imdb_id: string | null }
+  videos?: { results: TMDBVideo[] }
 }
 
 export interface TMDBTvShow {
@@ -160,6 +161,7 @@ export interface TMDBTvShow {
   similar?: TMDBPage<TMDBTvShow>
   recommendations?: TMDBPage<TMDBTvShow>
   external_ids?: { imdb_id: string | null }
+  videos?: { results: TMDBVideo[] }
 }
 
 export interface TMDBSeason {
@@ -191,6 +193,31 @@ export interface TMDBCastMember {
   character: string
   profile_path: string | null
   order: number
+}
+
+export interface TMDBVideo {
+  id: string
+  key: string
+  name: string
+  site: string // e.g. "YouTube"
+  type: string // e.g. "Trailer", "Teaser"
+  official: boolean
+  published_at?: string
+}
+
+export interface TMDBGenre {
+  id: number
+  name: string
+}
+
+// A person result from /search/person
+export interface TMDBPerson {
+  id: number
+  name: string
+  profile_path: string | null
+  known_for_department: string | null
+  popularity: number
+  known_for?: { id: number; title?: string; name?: string; media_type?: string }[]
 }
 
 export interface TMDBPage<T> {

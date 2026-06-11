@@ -334,7 +334,7 @@ export default function AnimePage(): JSX.Element {
         {relatedAnime && relatedAnime.length > 0 && (
           <section className="mt-4 pb-8">
             <h2 className="text-lg font-bold text-white mb-4">Related</h2>
-            <div className="flex gap-4 overflow-x-auto pb-2">
+            <div className="flex gap-4 overflow-x-auto overflow-y-hidden pb-2">
               {relatedAnime.map((rel) => (
                 <div
                   key={rel.node.id}

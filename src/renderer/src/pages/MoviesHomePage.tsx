@@ -202,14 +202,25 @@ export default function MoviesHomePage(): JSX.Element {
       />
 
       {/* Trending */}
-      <LazyMediaRow title={ROWS[1].title} Icon={ROWS[1].Icon} fetchPage={ROWS[1].fetchPage} />
+      <LazyMediaRow
+        title={ROWS[1].title}
+        Icon={ROWS[1].Icon}
+        maxItems={20}
+        fetchPage={ROWS[1].fetchPage}
+      />
 
       {/* Only on <provider> */}
       <ProviderRow />
 
-      {/* Remaining rows */}
+      {/* Remaining rows — cap each genre/category at ~20 (one TMDB page) */}
       {ROWS.slice(2).map((row) => (
-        <LazyMediaRow key={row.key} title={row.title} Icon={row.Icon} fetchPage={row.fetchPage} />
+        <LazyMediaRow
+          key={row.key}
+          title={row.title}
+          Icon={row.Icon}
+          maxItems={20}
+          fetchPage={row.fetchPage}
+        />
       ))}
     </div>
   )

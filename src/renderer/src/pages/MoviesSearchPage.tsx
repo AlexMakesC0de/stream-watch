@@ -1,113 +1,164 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Search, TrendingUp, Film, Tv } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Search, Compass } from 'lucide-react'
 import MediaGrid from '@/components/MediaGrid'
-import { searchMulti, getTrending } from '@/services/tmdb'
+import FilterBar, { type DiscoverFilters } from '@/components/FilterBar'
+import { searchMovies, searchTvShows, discoverMedia } from '@/services/tmdb'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
-import type { TMDBMediaItem } from '@/types'
+import type { TMDBMovie, TMDBTvShow, TMDBMediaItem, MediaType } from '@/types'
 
-type FilterType = 'all' | 'movie' | 'tv'
+type AnyMedia = TMDBMovie | TMDBTvShow | TMDBMediaItem
+
+// Map the friendly sort key to a TMDB sort_by string (date field differs by type).
+function sortByParam(key: DiscoverFilters['sortBy'], type: MediaType): string {
+  const dateField = type === 'movie' ? 'primary_release_date' : 'first_air_date'
+  switch (key) {
+    case 'rating':
+      return 'vote_average.desc'
+    case 'newest':
+      return `${dateField}.desc`
+    case 'oldest':
+      return `${dateField}.asc`
+    default:
+      return 'popularity.desc'
+  }
+}
 
 export default function MoviesSearchPage(): JSX.Element {
+  const [searchParams, setSearchParams] = useSearchParams()
+
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<FilterType>('all')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
 
-  const [results, setResults] = useState<TMDBMediaItem[]>([])
-  const [resultsPage, setResultsPage] = useState(1)
-  const [resultsTotalPages, setResultsTotalPages] = useState(1)
+  // Filters live in the URL (single source of truth). Deriving them from the
+  // query string — rather than seeding a separate state once — means a removal
+  // actually sticks: pressing Back can't resurrect a stale chip because there's
+  // no out-of-sync copy to fall back to.
+  const filters: DiscoverFilters = useMemo(() => {
+    const genres = (searchParams.get('genres') || '').split(',').filter(Boolean).map(Number)
+    const withCast = searchParams.get('withCast')
+    const castName = searchParams.get('castName')
+    const sort = searchParams.get('sort') as DiscoverFilters['sortBy'] | null
+    return {
+      type: searchParams.get('type') === 'tv' ? 'tv' : 'movie',
+      genres,
+      year: searchParams.get('year') ? parseInt(searchParams.get('year')!) : null,
+      sortBy: sort || 'popular',
+      minRating: searchParams.get('minRating') ? parseInt(searchParams.get('minRating')!) : 0,
+      cast: withCast && castName ? { id: parseInt(withCast), name: castName } : null
+    }
+  }, [searchParams])
 
-  const [trending, setTrending] = useState<TMDBMediaItem[]>([])
-  const [trendingPage, setTrendingPage] = useState(1)
-  const [trendingTotalPages, setTrendingTotalPages] = useState(1)
+  function patchFilters(patch: Partial<DiscoverFilters>): void {
+    const next = { ...filters, ...patch }
+    const params: Record<string, string> = { type: next.type }
+    if (next.genres.length) params.genres = next.genres.join(',')
+    if (next.year) params.year = String(next.year)
+    if (next.sortBy !== 'popular') params.sort = next.sortBy
+    if (next.minRating) params.minRating = String(next.minRating)
+    if (next.cast) {
+      params.withCast = String(next.cast.id)
+      params.castName = next.cast.name
+    }
+    // replace: filter tweaks shouldn't pile up as history entries.
+    setSearchParams(params, { replace: true })
+  }
 
+  const [results, setResults] = useState<AnyMedia[]>([])
+  const [pageNum, setPageNum] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
 
-  const hasSearched = query.trim().length > 0
-
-  // Initial trending
+  // Debounce the title query so we don't fire a search every keystroke.
   useEffect(() => {
-    getTrending('all', 'day', 1)
-      .then((data) => {
-        setTrending(data.results)
-        setTrendingTotalPages(data.total_pages)
-      })
-      .catch(console.error)
-  }, [])
-
-  // Debounced search; resets to page 1
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([])
-      setResultsPage(1)
-      return
-    }
-    const timer = setTimeout(async () => {
-      setLoading(true)
-      try {
-        const data = await searchMulti(query.trim(), 1)
-        setResults(data.results)
-        setResultsPage(1)
-        setResultsTotalPages(data.total_pages)
-      } catch (err) {
-        console.error('Search failed:', err)
-      } finally {
-        setLoading(false)
-      }
-    }, 400)
-    return () => clearTimeout(timer)
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 400)
+    return () => clearTimeout(t)
   }, [query])
 
-  const hasMore = hasSearched
-    ? resultsPage < resultsTotalPages
-    : trendingPage < trendingTotalPages
+  const searchMode = debouncedQuery.length > 0
+
+  const fetchPageData = useCallback(
+    async (page: number): Promise<{ results: AnyMedia[]; total_pages: number }> => {
+      if (searchMode) {
+        const data =
+          filters.type === 'movie'
+            ? await searchMovies(debouncedQuery, page)
+            : await searchTvShows(debouncedQuery, page)
+        return { results: data.results, total_pages: data.total_pages }
+      }
+      const data = await discoverMedia({
+        type: filters.type,
+        genres: filters.genres,
+        year: filters.year ?? undefined,
+        sortBy: sortByParam(filters.sortBy, filters.type),
+        minRating: filters.minRating,
+        withCast: filters.cast?.id,
+        page
+      })
+      return { results: data.results, total_pages: data.total_pages }
+    },
+    [searchMode, debouncedQuery, filters]
+  )
+
+  // Reset + load page 1 whenever the query or filters change.
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setResults([])
+    setPageNum(1)
+    fetchPageData(1)
+      .then((d) => {
+        if (cancelled) return
+        setResults(d.results)
+        setTotalPages(d.total_pages)
+      })
+      .catch(() => {
+        if (!cancelled) setResults([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fetchPageData])
+
+  const hasMore = pageNum < totalPages
 
   const loadMore = useCallback(async () => {
-    if (loadingMore || loading) return
+    if (loadingMore || loading || pageNum >= totalPages) return
     setLoadingMore(true)
     try {
-      if (hasSearched) {
-        const next = resultsPage + 1
-        if (next > resultsTotalPages) return
-        const data = await searchMulti(query.trim(), next)
-        setResults((prev) => [...prev, ...data.results])
-        setResultsPage(next)
-      } else {
-        const next = trendingPage + 1
-        if (next > trendingTotalPages) return
-        const data = await getTrending('all', 'day', next)
-        setTrending((prev) => [...prev, ...data.results])
-        setTrendingPage(next)
-      }
-    } catch (err) {
-      console.error('Load more failed:', err)
+      const next = pageNum + 1
+      const d = await fetchPageData(next)
+      setResults((prev) => [...prev, ...d.results])
+      setPageNum(next)
+    } catch {
+      /* ignore append errors */
     } finally {
       setLoadingMore(false)
     }
-  }, [loadingMore, loading, hasSearched, resultsPage, resultsTotalPages, trendingPage, trendingTotalPages, query])
+  }, [loadingMore, loading, pageNum, totalPages, fetchPageData])
 
-  const sentinelRef = useInfiniteScroll(loadMore, { hasMore, loading: loadingMore || loading })
+  const sentinelRef = useInfiniteScroll(loadMore, { hasMore, loading: loading || loadingMore })
 
-  const applyFilter = (list: TMDBMediaItem[]): TMDBMediaItem[] =>
-    filter === 'all'
-      ? list
-      : list.filter((r) => {
-          if ('media_type' in r && r.media_type) return r.media_type === filter
-          return filter === 'movie' ? 'title' in r : 'name' in r
-        })
-
-  const filteredResults = applyFilter(results)
-  const filteredTrending = applyFilter(trending)
+  const heading = searchMode
+    ? `Results for “${debouncedQuery}”`
+    : filters.cast
+      ? `${filters.type === 'movie' ? 'Movies' : 'TV shows'} with ${filters.cast.name}`
+      : `Browse ${filters.type === 'movie' ? 'Movies' : 'TV Shows'}`
 
   return (
     <div className="p-6">
       {/* Search bar */}
-      <div className="relative mb-6">
+      <div className="relative mb-4">
         <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-dark-400" />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search movies & TV shows..."
+          placeholder="Search movies & TV shows by title…"
           className="w-full pl-11 pr-4 py-3 bg-dark-900 border border-dark-800 rounded-xl
                      text-white placeholder:text-dark-500 focus:outline-none focus:border-accent
                      transition-colors"
@@ -115,40 +166,26 @@ export default function MoviesSearchPage(): JSX.Element {
         />
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex items-center gap-2 mb-6">
-        {([
-          { key: 'all', label: 'All', icon: Search },
-          { key: 'movie', label: 'Movies', icon: Film },
-          { key: 'tv', label: 'TV Shows', icon: Tv }
-        ] as const).map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setFilter(tab.key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              filter === tab.key
-                ? 'bg-accent/10 text-accent'
-                : 'text-dark-400 hover:bg-dark-900 hover:text-dark-200'
-            }`}
-          >
-            <tab.icon size={14} />
-            {tab.label}
-          </button>
-        ))}
+      {/* Filters */}
+      <FilterBar filters={filters} onChange={patchFilters} searchMode={searchMode} />
+      {searchMode && (
+        <p className="text-xs text-dark-500 mt-2">
+          Filters apply when browsing — clear the search box to use genre, year, sort & actor.
+        </p>
+      )}
+
+      {/* Heading */}
+      <div className="flex items-center gap-2 mt-6 mb-4">
+        {searchMode ? (
+          <Search size={20} className="text-accent" />
+        ) : (
+          <Compass size={20} className="text-accent" />
+        )}
+        <h2 className="text-xl font-bold text-white">{heading}</h2>
       </div>
 
-      {/* Results or trending */}
-      {hasSearched ? (
-        <MediaGrid media={filteredResults} loading={loading} />
-      ) : (
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={20} className="text-accent" />
-            <h2 className="text-xl font-bold text-white">Trending Today</h2>
-          </div>
-          <MediaGrid media={filteredTrending} loading={trending.length === 0} />
-        </div>
-      )}
+      {/* Results */}
+      <MediaGrid media={results} loading={loading} />
 
       {/* Infinite-scroll sentinel + loader */}
       {hasMore && <div ref={sentinelRef} className="h-1" />}

@@ -8,17 +8,22 @@ import {
   ArrowLeft,
   Film,
   Tv,
-  ChevronDown
+  ChevronDown,
+  Youtube,
+  User
 } from 'lucide-react'
 import StatusSelector from '@/components/StatusSelector'
 import MediaGrid from '@/components/MediaGrid'
+import TrailerModal from '@/components/TrailerModal'
 import {
   getMovieDetails,
   getTvShowDetails,
   getTvSeasonDetails,
   posterUrl,
-  backdropUrl
+  backdropUrl,
+  profileUrl
 } from '@/services/tmdb'
+import { setSavedLocal } from '@/services/savedMedia'
 import type {
   TMDBMovie,
   TMDBTvShow,
@@ -43,6 +48,7 @@ export default function MediaDetailPage(): JSX.Element {
   const [episodeProgress, setEpisodeProgress] = useState<MediaEpisodeProgress[]>([])
   const [loading, setLoading] = useState(true)
   const [descExpanded, setDescExpanded] = useState(false)
+  const [showTrailer, setShowTrailer] = useState(false)
 
   // TV-specific
   const [selectedSeason, setSelectedSeason] = useState(1)
@@ -126,11 +132,13 @@ export default function MediaDetailPage(): JSX.Element {
 
     const updated = (await window.api.getMedia(tmdbId, mediaType)) as LocalMedia
     setLocalMedia(updated)
+    setSavedLocal(tmdbId, mediaType, true)
   }
 
   async function handleRemove(): Promise<void> {
     await window.api.removeMedia(tmdbId, mediaType)
     setLocalMedia(null)
+    setSavedLocal(tmdbId, mediaType, false)
   }
 
   function handleWatchMovie(): void {
@@ -186,6 +194,11 @@ export default function MediaDetailPage(): JSX.Element {
   const similar = mediaType === 'movie'
     ? (detail as TMDBMovie).similar?.results.slice(0, 12) || []
     : (detail as TMDBTvShow).similar?.results.slice(0, 12) || []
+  const cast = detail.credits?.cast?.slice(0, 20) || []
+  const videos = detail.videos?.results || []
+  const trailer =
+    videos.find((v) => v.site === 'YouTube' && v.type === 'Trailer') ||
+    videos.find((v) => v.site === 'YouTube' && v.type === 'Teaser')
 
   return (
     <div className="relative">
@@ -300,6 +313,12 @@ export default function MediaDetailPage(): JSX.Element {
                   {episodeProgress.length > 0 ? 'Continue Watching' : 'Start Watching'}
                 </button>
               )}
+              {trailer && (
+                <button onClick={() => setShowTrailer(true)} className="btn-secondary">
+                  <Youtube size={16} />
+                  Trailer
+                </button>
+              )}
             </div>
 
             {/* Description */}
@@ -324,6 +343,46 @@ export default function MediaDetailPage(): JSX.Element {
             )}
           </div>
         </div>
+
+        {/* Cast */}
+        {cast.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-lg font-bold text-white mb-4">Cast</h2>
+            <div className="flex gap-4 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1">
+              {cast.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() =>
+                    navigate(
+                      `/movies/search?type=${mediaType}&withCast=${c.id}&castName=${encodeURIComponent(c.name)}`
+                    )
+                  }
+                  className="shrink-0 w-24 text-center group"
+                  title={`See ${mediaType === 'movie' ? 'movies' : 'shows'} with ${c.name}`}
+                >
+                  <div className="w-24 h-24 rounded-full overflow-hidden bg-dark-800 mb-2 mx-auto">
+                    {c.profile_path ? (
+                      <img
+                        src={profileUrl(c.profile_path, 'w185')}
+                        alt={c.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <User size={28} className="text-dark-600" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs font-medium text-white truncate">{c.name}</p>
+                  {c.character && (
+                    <p className="text-[11px] text-dark-400 truncate">{c.character}</p>
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* TV Season/Episode browser */}
         {mediaType === 'tv' && tvShow?.seasons && (
@@ -431,6 +490,11 @@ export default function MediaDetailPage(): JSX.Element {
           </section>
         )}
       </div>
+
+      {/* Trailer */}
+      {showTrailer && trailer && (
+        <TrailerModal youtubeKey={trailer.key} title={title} onClose={() => setShowTrailer(false)} />
+      )}
     </div>
   )
 }

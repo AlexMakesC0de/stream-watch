@@ -1,5 +1,5 @@
-import { Routes, Route, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { Routes, Route, useLocation, useNavigationType } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import Sidebar from './components/Sidebar'
 import TitleBar from './components/TitleBar'
 import UpdateNotification from './components/UpdateNotification'
@@ -52,6 +52,9 @@ function applyAccentColor(hex: string): void {
 
 export default function App(): JSX.Element {
   const location = useLocation()
+  const navType = useNavigationType()
+  const mainRef = useRef<HTMLElement>(null)
+  const scrollPositions = useRef<Map<string, number>>(new Map())
   const isWatchPage =
     location.pathname.startsWith('/anime/watch/') ||
     location.pathname.startsWith('/movies/watch/')
@@ -75,12 +78,45 @@ export default function App(): JSX.Element {
     })
   }, [currentMode])
 
+  // ─── Scroll restoration ───────────────────────────────────────
+  // Continuously record the current page's scroll so we can restore it on Back.
+  useEffect(() => {
+    const el = mainRef.current
+    if (!el) return
+    const key = location.key
+    const onScroll = (): void => {
+      scrollPositions.current.set(key, el.scrollTop)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [location.key])
+
+  // On Back (POP) restore the saved position; on a new push, start at the top.
+  // Content often loads async, so retry across a few frames until it fits.
+  useLayoutEffect(() => {
+    const target = navType === 'POP' ? scrollPositions.current.get(location.key) ?? 0 : 0
+    let frame = 0
+    let tries = 0
+    const apply = (): void => {
+      const el = mainRef.current
+      if (!el) return
+      el.scrollTop = target
+      tries += 1
+      if (target > 0 && el.scrollTop < target - 2 && tries < 30) {
+        frame = requestAnimationFrame(apply)
+      }
+    }
+    frame = requestAnimationFrame(apply)
+    return () => cancelAnimationFrame(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key])
+
   return (
     <div className={`flex flex-col h-screen ${themeClass}`}>
       {!isWatchPage && !isHub && <TitleBar />}
       <div className="flex flex-1 overflow-hidden">
         {!isWatchPage && !isHub && <Sidebar />}
-        <main className="flex-1 overflow-y-auto">
+        <main ref={mainRef} className="flex-1 overflow-y-auto">
           <Routes>
             {/* Hub */}
             <Route path="/" element={<HubPage />} />

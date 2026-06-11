@@ -12,8 +12,9 @@ import {
   Tv
 } from 'lucide-react'
 import { posterUrl } from '@/services/tmdb'
+import { setSavedLocal } from '@/services/savedMedia'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
-import type { LocalMedia, WatchStatus, MediaEpisodeProgress } from '@/types'
+import type { LocalMedia, WatchStatus, MediaEpisodeProgress, MediaType } from '@/types'
 
 const PAGE_SIZE = 24
 
@@ -99,6 +100,7 @@ export default function MoviesLibraryPage(): JSX.Element {
 
   async function handleRemove(tmdbId: number, mediaType: string): Promise<void> {
     await window.api.removeMedia(tmdbId, mediaType)
+    setSavedLocal(tmdbId, mediaType as MediaType, false)
     loadLibrary()
   }
 

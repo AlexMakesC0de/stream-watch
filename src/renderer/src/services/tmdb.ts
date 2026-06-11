@@ -1,4 +1,13 @@
-import type { TMDBMovie, TMDBTvShow, TMDBPage, TMDBMediaItem, TMDBSeason } from '@/types'
+import type {
+  TMDBMovie,
+  TMDBTvShow,
+  TMDBPage,
+  TMDBMediaItem,
+  TMDBSeason,
+  TMDBGenre,
+  TMDBPerson,
+  MediaType
+} from '@/types'
 
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 export const TMDB_IMG = 'https://image.tmdb.org/t/p'
@@ -305,6 +314,72 @@ export async function discoverTvByGenre(
   return data
 }
 
+// ─── Discover with filters (genre / year / sort / rating / cast) ─
+
+export interface DiscoverParams {
+  type: MediaType
+  genres?: number[]
+  year?: number
+  sortBy?: string
+  minRating?: number
+  withCast?: number
+  page?: number
+}
+
+export async function discoverMedia(params: DiscoverParams): Promise<TMDBPage<TMDBMediaItem>> {
+  const { type, genres, year, sortBy = 'popularity.desc', minRating, withCast, page = 1 } = params
+
+  const q: Record<string, string> = {
+    sort_by: sortBy,
+    page: String(page),
+    include_adult: 'false'
+  }
+  // Multiple genres are OR-joined (titles matching ANY) — friendlier than AND.
+  if (genres && genres.length) q.with_genres = genres.join('|')
+  if (year) q[type === 'movie' ? 'primary_release_year' : 'first_air_date_year'] = String(year)
+  if (typeof minRating === 'number' && minRating > 0) {
+    q['vote_average.gte'] = String(minRating)
+    q['vote_count.gte'] = '50'
+  }
+  // A vote floor keeps rating-sorted results from surfacing obscure 10/10s.
+  if (sortBy.startsWith('vote_average') && !q['vote_count.gte']) q['vote_count.gte'] = '200'
+  if (withCast) q[type === 'movie' ? 'with_cast' : 'with_people'] = String(withCast)
+
+  const key = `discover:${type}:${JSON.stringify(q)}`
+  const cached = getCached<TMDBPage<TMDBMediaItem>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBMediaItem>>(`/discover/${type}`, q)
+  // /discover omits media_type on items — tag it so cards route correctly.
+  data.results = data.results.map((r) => ({ ...r, media_type: type })) as TMDBMediaItem[]
+  setCache(key, data)
+  return data
+}
+
+export async function getGenreList(type: MediaType): Promise<TMDBGenre[]> {
+  const key = `genres:${type}`
+  const cached = getCached<TMDBGenre[]>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<{ genres: TMDBGenre[] }>(`/genre/${type}/list`)
+  setCache(key, data.genres, 24 * 60 * 60 * 1000)
+  return data.genres
+}
+
+export async function searchPeople(query: string, page = 1): Promise<TMDBPage<TMDBPerson>> {
+  const key = `search:person:${query}:${page}`
+  const cached = getCached<TMDBPage<TMDBPerson>>(key)
+  if (cached) return cached
+
+  const data = await tmdbFetch<TMDBPage<TMDBPerson>>('/search/person', {
+    query,
+    page: String(page),
+    include_adult: 'false'
+  })
+  setCache(key, data, 2 * 60 * 1000)
+  return data
+}
+
 // ─── Top Rated ───────────────────────────────────────────────
 
 export async function getTopRatedMovies(page = 1): Promise<TMDBPage<TMDBMovie>> {
@@ -390,7 +465,7 @@ export async function getMovieDetails(id: number): Promise<TMDBMovie> {
   if (cached) return cached
 
   const data = await tmdbFetch<TMDBMovie>(`/movie/${id}`, {
-    append_to_response: 'credits,similar,recommendations,external_ids'
+    append_to_response: 'credits,similar,recommendations,external_ids,videos'
   })
   setCache(key, data, 10 * 60 * 1000)
   return data
@@ -402,7 +477,7 @@ export async function getTvShowDetails(id: number): Promise<TMDBTvShow> {
   if (cached) return cached
 
   const data = await tmdbFetch<TMDBTvShow>(`/tv/${id}`, {
-    append_to_response: 'credits,similar,recommendations,external_ids'
+    append_to_response: 'credits,similar,recommendations,external_ids,videos'
   })
   setCache(key, data, 10 * 60 * 1000)
   return data

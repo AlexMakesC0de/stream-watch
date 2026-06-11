@@ -10,6 +10,7 @@ interface EmbedPlayerProps {
   onProgress?: (currentTime: number, duration: number) => void
   onEnded?: () => void
   onError?: (message: string) => void
+  onLoadError?: (info: { code: number; description: string; url: string }) => void
 }
 
 /**
@@ -26,14 +27,27 @@ export default function EmbedPlayer({
   disableInteractions = false,
   onProgress,
   onEnded,
-  onError
+  onLoadError
 }: EmbedPlayerProps): JSX.Element {
   const webviewRef = useRef<Electron.WebviewTag | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const progressIntervalRef = useRef<number | null>(null)
   const lastReportedRef = useRef(0)
   const endedFiredRef = useRef(false)
+  // Ensures we only report a load failure once per source (mount)
+  const loadErrorFiredRef = useRef(false)
   const [isLoading, setIsLoading] = useState(true)
+
+  // Report a load failure exactly once, so the parent can move to another source
+  const reportLoadError = useCallback(
+    (info: { code: number; description: string; url: string }) => {
+      if (loadErrorFiredRef.current) return
+      loadErrorFiredRef.current = true
+      console.warn(`[EmbedPlayer] Source unusable: ${info.description} (${info.url})`)
+      onLoadError?.(info)
+    },
+    [onLoadError]
+  )
 
   const dispatchAutoplayGesture = useCallback(() => {
     const webview = webviewRef.current
@@ -61,6 +75,34 @@ export default function EmbedPlayer({
     const webview = webviewRef.current
     if (!webview) return
     setIsLoading(false)
+
+    // Detect "loaded but broken" pages — Cloudflare/gateway errors, host-down
+    // notices, etc. These return a real HTML document (so did-fail-load never
+    // fires) but will never produce a player. Treat them as a failed source.
+    webview
+      .executeJavaScript(`
+        (function() {
+          var t = (document.title || '').toLowerCase();
+          var b = (document.body ? document.body.innerText : '').toLowerCase().slice(0, 600);
+          var hay = t + ' ' + b;
+          var sigs = [
+            'connection timed out', 'error code 5', 'error code 4',
+            '520:', '521:', '522:', '523:', '524:',
+            '502 bad gateway', '503 service', '504 gateway',
+            'web server is down', 'host error', 'origin is unreachable',
+            'this site can', 'dns_probe', 'err_name_not_resolved',
+            'video not found', 'media not found', 'no sources found'
+          ];
+          for (var i = 0; i < sigs.length; i++) {
+            if (hay.indexOf(sigs[i]) > -1) return sigs[i];
+          }
+          return '';
+        })();
+      `)
+      .then((sig: string) => {
+        if (sig) reportLoadError({ code: 0, description: 'Source error page: ' + sig, url: src })
+      })
+      .catch(() => {})
 
     // Block popups/new-windows from ads
     try {
@@ -99,12 +141,11 @@ export default function EmbedPlayer({
       body > div[style*="position:fixed"]:not(:has(video)):not(:has(iframe)) {
         display: none !important;
       }
-      /* Make the video player fill the entire view */
-      video { width: 100% !important; height: 100% !important; object-fit: contain !important; }
-      .jw-wrapper, .video-js, .plyr, [class*="player"] {
-        width: 100% !important; height: 100% !important;
-        position: fixed !important; top: 0 !important; left: 0 !important;
-      }
+      /* NOTE: deliberately do NOT force the player wrapper to position:fixed /
+         100% size. Matching [class*="player"], .plyr, .video-js etc. and pinning
+         them fullscreen rips the provider's control bar out of place and stacks a
+         layer over the buttons, making pause/volume unclickable. Modern players
+         already fill their own viewport, so leave their layout alone. */
     `).catch(() => {})
 
     // Inject popup/redirect blocker script
@@ -255,8 +296,9 @@ export default function EmbedPlayer({
               const u = new URL(src, location.href);
               u.searchParams.set('autoplay', '1');
               u.searchParams.set('autoPlay', '1');
-              u.searchParams.set('mute', '1');
-              u.searchParams.set('muted', '1');
+              // NOTE: do NOT force mute here — autoplay-policy is set to
+              // 'no-user-gesture-required' app-wide, so sound is allowed. Forcing
+              // mute=1 on cross-origin iframe players left them permanently silent.
               const next = u.toString();
               if (next !== src) iframe.setAttribute('src', next);
             } catch(e) {}
@@ -290,19 +332,18 @@ export default function EmbedPlayer({
           }
           reported = true;
 
-          // Try to play
-          video.muted = true;
-          const p = video.play();
+          // Try to play WITH sound first (allowed by the autoplay policy). Only
+          // if that's rejected do we fall back to muted playback, then restore
+          // sound shortly after — otherwise streams stay silent forever.
+          var p = video.play();
           if (p && p.then) {
             p.then(function() { playing = true; }).catch(function() {
-              // Fallback: try muted
               video.muted = true;
-              video.play().then(function() { playing = true; }).catch(function() {});
+              video.play().then(function() {
+                playing = true;
+                setTimeout(function() { try { video.muted = false; } catch (e) {} }, 500);
+              }).catch(function() {});
             });
-          }
-
-          if (playing) {
-            setTimeout(function() { video.muted = false; }, 300);
           }
 
           // Also dispatch a click on the video in case the player needs it
@@ -314,7 +355,7 @@ export default function EmbedPlayer({
       })();
     `
     webview.executeJavaScript(initScript).catch(() => {})
-  }, [initialTime])
+  }, [initialTime, reportLoadError, src])
 
   // Start progress polling
   useEffect(() => {
@@ -370,6 +411,67 @@ export default function EmbedPlayer({
     }
   }, [isLoading, onProgress, onEnded])
 
+  // Health check: if the page loads but never produces a <video> or player
+  // iframe within a grace period, the source is effectively dead — report it
+  // so the parent can fall through to another provider.
+  useEffect(() => {
+    if (isLoading) return
+    const webview = webviewRef.current
+    if (!webview) return
+
+    let elapsed = 0
+    const STEP = 2000
+    const GRACE_MS = 14000
+    const timer = window.setInterval(() => {
+      elapsed += STEP
+      webview
+        .executeJavaScript(`
+          (function() {
+            var t = (document.title || '').toLowerCase();
+            var b = (document.body ? document.body.innerText : '').toLowerCase().slice(0, 900);
+            var hay = t + ' ' + b;
+            // Provider's own "can't serve this" notices — these appear a few
+            // seconds in, after the player tries (and fails) to find a stream.
+            var errs = [
+              'no sources found', 'no source found', 'source not found',
+              'no streams', 'no stream found', 'no playable',
+              'not available in your', 'not available in this',
+              'media not found', 'video not found', 'content not found'
+            ];
+            for (var i = 0; i < errs.length; i++) {
+              if (hay.indexOf(errs[i]) > -1) return 'ERR:' + errs[i];
+            }
+            if (document.querySelector('video')) return 'PLAYER';
+            var f = document.querySelector('iframe[src]');
+            if (f && f.src && f.src.indexOf('about:blank') === -1) return 'PLAYER';
+            return '';
+          })();
+        `)
+        .then((res: string) => {
+          if (res === 'PLAYER') {
+            window.clearInterval(timer)
+            return
+          }
+          if (res.indexOf('ERR:') === 0) {
+            window.clearInterval(timer)
+            reportLoadError({ code: 0, description: 'Source: ' + res.slice(4), url: src })
+            return
+          }
+          if (elapsed >= GRACE_MS) {
+            window.clearInterval(timer)
+            reportLoadError({
+              code: 0,
+              description: 'No player appeared (source likely unavailable)',
+              url: src
+            })
+          }
+        })
+        .catch(() => {})
+    }, STEP)
+
+    return () => window.clearInterval(timer)
+  }, [isLoading, reportLoadError, src])
+
   // Handle webview fullscreen requests (e.g. user clicks fullscreen button inside the video)
   useEffect(() => {
     const webview = webviewRef.current
@@ -407,14 +509,30 @@ export default function EmbedPlayer({
   // Handle webview errors
   const onDidFailLoad = useCallback(
     (_e: Event) => {
-      const ev = _e as unknown as { errorDescription: string; validatedURL: string }
-      console.warn(`[EmbedPlayer] Failed to load: ${ev.errorDescription} (${ev.validatedURL})`)
-      // Don't report -3 (aborted) as an error
-      if (ev.errorDescription && ev.errorDescription !== 'ERR_ABORTED') {
-        onError?.(`Failed to load player: ${ev.errorDescription}`)
+      const ev = _e as unknown as {
+        errorCode: number
+        errorDescription: string
+        validatedURL: string
+        isMainFrame: boolean
+      }
+      // Ignore user-aborted loads (-3), which fire whenever we switch sources
+      if (ev.errorCode === -3 || ev.errorDescription === 'ERR_ABORTED') return
+
+      // A main-frame failure means the provider page itself didn't load
+      // (dead domain, DNS failure, blocked, etc.) — surface it so the caller
+      // can move on to another source instead of showing a black screen.
+      if (ev.isMainFrame) {
+        reportLoadError({
+          code: ev.errorCode,
+          description: ev.errorDescription,
+          url: ev.validatedURL
+        })
+      } else {
+        // Sub-resource (often an ad/iframe) failed — non-fatal
+        console.warn(`[EmbedPlayer] Sub-resource failed: ${ev.errorDescription}`)
       }
     },
-    [onError]
+    [reportLoadError]
   )
 
   // Set up webview event listeners
