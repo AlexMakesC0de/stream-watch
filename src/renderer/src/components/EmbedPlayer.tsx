@@ -389,14 +389,18 @@ export default function EmbedPlayer({
             lastReportedRef.current = state.currentTime
             onProgress?.(state.currentTime, state.duration)
           }
-          // Detect episode end: video.ended, OR watched past 85% of duration
-          const isNearEnd = state.duration > 0 && state.currentTime / state.duration > 0.85
-          if ((state.ended || isNearEnd) && !endedFiredRef.current) {
+          // Only treat the episode as finished at the GENUINE end of the
+          // stream — never at a fixed percentage. The old 0.85 check fired
+          // early because a stream's real duration is usually shorter than the
+          // listed runtime (a "48 min" episode often streams as ~44 min), so
+          // 85% landed near the 40-min mark and auto-advanced mid-episode.
+          // The duration > 60 guard avoids short ad clips being seen as "ended".
+          const reachedEnd =
+            state.duration > 60 &&
+            (state.ended || state.currentTime >= state.duration - 2)
+          if (reachedEnd && !endedFiredRef.current) {
             endedFiredRef.current = true
-            // Report final progress so it's marked completed
-            if (state.duration > 0) {
-              onProgress?.(state.currentTime, state.duration)
-            }
+            onProgress?.(state.currentTime, state.duration)
             onEnded?.()
           }
         })
