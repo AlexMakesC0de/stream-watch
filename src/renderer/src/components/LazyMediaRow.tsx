@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import MediaRow from './MediaRow'
 import type { TMDBMovie, TMDBTvShow, TMDBMediaItem } from '@/types'
@@ -37,8 +37,39 @@ export default function LazyMediaRow({
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
 
+  // Despite the name, this row used to fetch the moment it mounted — "lazy"
+  // only ever described its pagination. Home mounts a dozen of these, so the
+  // page opened by firing every row's request at once. Now a row waits until
+  // it is within a screen of the viewport.
+  const [visible, setVisible] = useState(false)
+  const holderRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (visible) return
+    const el = holderRef.current
+    if (!el) return
+    // No IntersectionObserver (or a detached node): fall back to loading now
+    // rather than showing a row that never fills.
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true)
+          io.disconnect()
+        }
+      },
+      { rootMargin: '600px 0px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [visible])
+
   // Initial load (and reset whenever the fetcher changes, e.g. provider switch).
   useEffect(() => {
+    if (!visible) return
     let cancelled = false
     setLoading(true)
     setItems([])
@@ -58,7 +89,7 @@ export default function LazyMediaRow({
     return () => {
       cancelled = true
     }
-  }, [fetchPage, maxItems])
+  }, [fetchPage, maxItems, visible])
 
   const loadMore = useCallback(() => {
     if (loading || maxItems || page >= totalPages) return
@@ -73,16 +104,18 @@ export default function LazyMediaRow({
   }, [loading, maxItems, page, totalPages, fetchPage])
 
   return (
-    <MediaRow
-      title={title}
-      Icon={Icon}
-      badge={badge}
-      ranked={ranked}
-      items={items}
-      loading={loading}
-      hasMore={!maxItems && page < totalPages}
-      onLoadMore={loadMore}
-      headerRight={headerRight}
-    />
+    <div ref={holderRef}>
+      <MediaRow
+        title={title}
+        Icon={Icon}
+        badge={badge}
+        ranked={ranked}
+        items={items}
+        loading={loading}
+        hasMore={!maxItems && page < totalPages}
+        onLoadMore={loadMore}
+        headerRight={headerRight}
+      />
+    </div>
   )
 }

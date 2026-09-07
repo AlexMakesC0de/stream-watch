@@ -5,7 +5,6 @@ import {
   Search,
   Library,
   Play,
-  Clock,
   CheckCircle2,
   PauseCircle,
   XCircle,
@@ -141,33 +140,33 @@ export default function Sidebar(): JSX.Element {
           Settings
         </button>
 
-        {/* Switch mode */}
-        <button
-          onClick={() => switchToMode(otherMode)}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap
-                     text-dark-400 hover:bg-dark-900 hover:text-white transition-colors"
-        >
-          <ArrowLeftRight size={16} className="shrink-0" />
-          Switch to {otherMode === 'movies' ? 'Movies & TV' : 'Anime'}
-        </button>
-
-        {/* Back to hub */}
-        <button
-          onClick={() => {
-            localStorage.removeItem('hub-remember-mode')
-            navigate('/')
-          }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
-                     text-dark-500 hover:bg-dark-900 hover:text-dark-300 transition-colors"
-        >
-          <LayoutGrid size={16} />
-          Back to Hub
-        </button>
-
-        <div className="flex items-center gap-2 text-dark-600 text-xs px-3 pt-1">
-          <Clock size={12} />
-          <span>v{appVersion}</span>
+        {/* Mode switch + hub, on one row instead of two full-width buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => switchToMode(otherMode)}
+            title={`Switch to ${otherMode === 'movies' ? 'Movies & TV' : 'Anime'}`}
+            className="flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium
+                       text-dark-400 hover:bg-dark-900 hover:text-white transition-colors"
+          >
+            <ArrowLeftRight size={16} className="shrink-0" />
+            <span className="truncate">
+              {otherMode === 'movies' ? 'Movies & TV' : 'Anime'}
+            </span>
+          </button>
+          {/* ?choose=1 tells the hub not to auto-redirect. Previously this
+              deleted the remembered-mode preference outright, so simply
+              visiting the hub silently un-ticked "Remember my choice". */}
+          <button
+            onClick={() => navigate('/?choose=1')}
+            title="Back to hub"
+            aria-label="Back to hub"
+            className="shrink-0 p-2 rounded-lg text-dark-500 hover:bg-dark-900 hover:text-dark-200 transition-colors"
+          >
+            <LayoutGrid size={16} />
+          </button>
         </div>
+
+        <div className="text-dark-600 text-xs px-3 pt-1">v{appVersion}</div>
       </div>
     </aside>
   )

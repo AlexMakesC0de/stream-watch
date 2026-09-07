@@ -73,7 +73,20 @@ const ANIME_DETAIL_FRAGMENT = `
   ${ANIME_FRAGMENT}
 `
 
+/** Same dedup as TMDB: identical concurrent queries share one request. */
+const inFlight = new Map<string, Promise<unknown>>()
+
 async function anilistQuery<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  const dedupeKey = query + '|' + JSON.stringify(variables)
+  const existing = inFlight.get(dedupeKey)
+  if (existing) return existing as Promise<T>
+
+  const request = runQuery<T>(query, variables).finally(() => inFlight.delete(dedupeKey))
+  inFlight.set(dedupeKey, request)
+  return request
+}
+
+async function runQuery<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   const maxRetries = 3
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -137,6 +150,66 @@ export async function searchAnime(
   const result = data.Page
   setCache(key, result, 2 * 60 * 1000) // 2 min for search results
   return result
+}
+
+
+// ─── Discover (filterable browse) ────────────────────────────
+
+export interface AnimeDiscoverParams {
+  genres?: string[]
+  year?: number
+  minScore?: number
+  sort?: 'POPULARITY_DESC' | 'SCORE_DESC' | 'START_DATE_DESC' | 'START_DATE'
+  page?: number
+  perPage?: number
+}
+
+/** AniList genre vocabulary, for the filter bar. */
+export async function getAnimeGenres(): Promise<string[]> {
+  const key = makeCacheKey('genres', {})
+  const cached = getCached<string[]>(key)
+  if (cached) return cached
+  const data = await anilistQuery<{ GenreCollection: string[] }>('query { GenreCollection }', {})
+  const list = (data.GenreCollection || []).filter((g) => g !== 'Hentai')
+  setCache(key, list, 24 * 60 * 60 * 1000)
+  return list
+}
+
+/**
+ * Filterable anime browse. AniList has no discover endpoint of its own, so this
+ * is the equivalent of TMDB's discover: genre, year, score and sort, paged.
+ */
+export async function discoverAnime(params: AnimeDiscoverParams = {}): Promise<AniListPage> {
+  const { genres, year, minScore, sort = 'POPULARITY_DESC', page = 1, perPage = 24 } = params
+  const vars: Record<string, unknown> = { page, perPage, sort: [sort] }
+  if (genres?.length) vars.genre_in = genres
+  if (year) vars.seasonYear = year
+  if (minScore) vars.averageScore_greater = minScore * 10
+
+  const key = makeCacheKey('discoverAnime', vars)
+  const cached = getCached<AniListPage>(key)
+  if (cached) return cached
+
+  const gql = `
+    query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre_in: [String], $seasonYear: Int, $averageScore_greater: Int) {
+      Page(page: $page, perPage: $perPage) {
+        pageInfo { total currentPage lastPage hasNextPage }
+        media(
+          type: ANIME
+          sort: $sort
+          genre_in: $genre_in
+          seasonYear: $seasonYear
+          averageScore_greater: $averageScore_greater
+        ) {
+          ...AnimeFields
+        }
+      }
+    }
+    ${ANIME_FRAGMENT}
+  `
+  const data = await anilistQuery<{ Page: AniListPage }>(gql, vars)
+  setCache(key, data.Page, 5 * 60 * 1000)
+  return data.Page
 }
 
 // ─── Trending ────────────────────────────────────────────────

@@ -28,6 +28,8 @@ import {
   getMediaEpisodeProgress,
   getMediaContinueWatching,
   toggleMediaEpisodeCompleted,
+  removeMediaFromContinueWatching,
+  removeAnimeFromContinueWatching,
   getSetting,
   setSetting,
   getAllSettings,
@@ -52,7 +54,8 @@ function createWindow(): BrowserWindow {
     minWidth: 1000,
     minHeight: 700,
     show: false,
-    backgroundColor: '#111214',
+    // Matches the app ground so launch doesn't flash a lighter panel.
+    backgroundColor: '#0b0d13',
     // macOS: use native hidden title bar; Linux/Windows: completely frameless
     ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
     autoHideMenuBar: true,
@@ -132,6 +135,9 @@ function registerIpcHandlers(): void {
     getEpisodeProgress(anilistId, episodeNumber)
   )
   ipcMain.handle('db:get-continue-watching', () => getContinueWatching())
+  ipcMain.handle('db:remove-anime-continue-watching', (_event, anilistId: number) =>
+    removeAnimeFromContinueWatching(anilistId)
+  )
   ipcMain.handle('db:toggle-episode-completed', (_event, anilistId: number, episodeNumber: number, completed: boolean) =>
     toggleEpisodeCompleted(anilistId, episodeNumber, completed)
   )
@@ -170,6 +176,9 @@ function registerIpcHandlers(): void {
       getMediaEpisodeProgress(tmdbId, mediaType, seasonNumber, episodeNumber)
   )
   ipcMain.handle('db:get-media-continue-watching', () => getMediaContinueWatching())
+  ipcMain.handle('db:remove-media-continue-watching', (_event, tmdbId: number, mediaType: string) =>
+    removeMediaFromContinueWatching(tmdbId, mediaType)
+  )
   ipcMain.handle(
     'db:toggle-media-episode-completed',
     (_event, tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null, completed: boolean) =>

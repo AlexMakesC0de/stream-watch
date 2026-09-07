@@ -1,3 +1,4 @@
+import { SearchX } from 'lucide-react'
 import MediaCard from './MediaCard'
 import type { TMDBMovie, TMDBTvShow, TMDBMediaItem } from '@/types'
 
@@ -6,9 +7,20 @@ type MediaItem = TMDBMovie | TMDBTvShow | TMDBMediaItem
 interface MediaGridProps {
   media: MediaItem[]
   loading?: boolean
+  /** Empty-state copy. Callers know why the list is empty; the grid doesn't. */
+  emptyTitle?: string
+  emptyHint?: string
+  /** Recovery action — e.g. "Clear filters". */
+  emptyAction?: React.ReactNode
 }
 
-export default function MediaGrid({ media, loading }: MediaGridProps): JSX.Element {
+export default function MediaGrid({
+  media,
+  loading,
+  emptyTitle = 'No results found',
+  emptyHint,
+  emptyAction
+}: MediaGridProps): JSX.Element {
   if (loading) {
     return (
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -25,8 +37,11 @@ export default function MediaGrid({ media, loading }: MediaGridProps): JSX.Eleme
 
   if (media.length === 0) {
     return (
-      <div className="text-center py-12 text-dark-500">
-        <p>No results found</p>
+      <div className="text-center py-16 text-dark-500">
+        <SearchX size={48} className="mx-auto mb-4 opacity-50" />
+        <p className="text-lg font-medium">{emptyTitle}</p>
+        {emptyHint && <p className="text-sm mt-1">{emptyHint}</p>}
+        {emptyAction}
       </div>
     )
   }

@@ -1,17 +1,21 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { Tv, Film, Sparkles, Minus, Square, Copy, X } from 'lucide-react'
 
 export default function HubPage(): JSX.Element {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [appVersion, setAppVersion] = useState('...')
   const [isMaximized, setIsMaximized] = useState(false)
   const isMac = navigator.userAgent.includes('Macintosh')
 
   useEffect(() => {
-    // Auto-redirect if remember-mode is set
+    // Auto-redirect if remember-mode is set — unless the user deliberately
+    // asked for the hub (?choose=1), in which case show it so they can pick a
+    // mode or change the remembered choice without losing the setting.
     const remembered = localStorage.getItem('hub-remember-mode')
-    if (remembered === 'anime' || remembered === 'movies') {
+    const forceChoose = searchParams.get('choose') === '1'
+    if (!forceChoose && (remembered === 'anime' || remembered === 'movies')) {
       navigate(`/${remembered}`, { replace: true })
       return
     }

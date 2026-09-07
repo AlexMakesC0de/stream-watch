@@ -18,6 +18,13 @@ import {
   getTvShowDetails,
   getTvSeasonDetails
 } from '@/services/tmdb'
+import {
+  loadProviderStats,
+  orderProviders,
+  recordSuccess,
+  recordFailure,
+  titleKey
+} from '@/services/providerStats'
 import type { TMDBMovie, TMDBTvShow, TMDBSeason, MediaEpisodeProgress, MediaType } from '@/types'
 
 /* -- Embed Provider Definitions ------------------------------------------ */
@@ -41,11 +48,6 @@ const EMBED_PROVIDERS: EmbedProvider[] = [
     name: 'VidLink',
     buildMovieUrl: (id) => `https://vidlink.pro/movie/${id}`,
     buildTvUrl: (id, s, e) => `https://vidlink.pro/tv/${id}/${s}/${e}`
-  },
-  {
-    name: 'VidSrc CC',
-    buildMovieUrl: (id) => `https://vidsrc.cc/v2/embed/movie/${id}`,
-    buildTvUrl: (id, s, e) => `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}`
   },
   {
     name: 'VidSrc SU',
@@ -188,6 +190,18 @@ export default function MoviesWatchPage(): JSX.Element {
   }, [tmdbId, mediaType, currentSeason])
 
   /* -- Load user-defined custom streaming sources ------------------------ */
+  const statsKey = titleKey(mediaType, tmdbId)
+
+  useEffect(() => {
+    let cancelled = false
+    loadProviderStats().then(() => {
+      if (!cancelled) setProviders((list) => orderProviders(list, statsKey))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [statsKey])
+
   useEffect(() => {
     window.api.getSetting('customEmbedProviders').then((raw) => {
       if (!raw) return
@@ -204,12 +218,12 @@ export default function MoviesWatchPage(): JSX.Element {
                 .replace(/\{season\}/g, String(s))
                 .replace(/\{episode\}/g, String(e))
           }))
-        if (mapped.length > 0) setProviders([...mapped, ...EMBED_PROVIDERS])
+        if (mapped.length > 0) setProviders(orderProviders([...mapped, ...EMBED_PROVIDERS], statsKey))
       } catch {
         /* malformed setting — keep built-in providers */
       }
     })
-  }, [])
+  }, [statsKey])
 
   /* -- Build embed URL when provider / route changes --------------------- */
   useEffect(() => {
@@ -228,8 +242,15 @@ export default function MoviesWatchPage(): JSX.Element {
   }, [tmdbId, mediaType, currentSeason, currentEpisode])
 
   /* -- Auto-skip a source that fails to load ----------------------------- */
+  const handlePlayerReady = useCallback(() => {
+    const name = providers[providerIndex]?.name
+    if (name) recordSuccess(name, statsKey)
+  }, [providers, providerIndex, statsKey])
+
   const handleLoadError = useCallback(() => {
     const total = providers.length
+    const failedName = providers[providerIndex]?.name
+    if (failedName) recordFailure(failedName, statsKey)
     triedProvidersRef.current.add(providerIndex)
 
     // Find the next source we haven't already tried for this title
@@ -249,7 +270,7 @@ export default function MoviesWatchPage(): JSX.Element {
         'No source had a stream for this title. Free sources vary by title and region — a different title may work, or the same title may need a VPN to a region the sources serve (commonly US/EU). You can also add your own source in Settings.'
       )
     }
-  }, [providers.length, providerIndex])
+  }, [providers, providerIndex, statsKey])
 
   const retryAllProviders = useCallback(() => {
     triedProvidersRef.current = new Set()
@@ -317,31 +338,19 @@ export default function MoviesWatchPage(): JSX.Element {
     [tmdbId, mediaType, currentSeason, currentEpisode]
   )
 
+  // Marks the episode watched — deliberately does NOT advance to the next one.
+  // "Ended" here is inferred by polling the provider page's first <video>
+  // element (see EmbedPlayer), which cannot tell the feature from a pre-roll
+  // ad, cannot see players inside cross-origin iframes, and keeps reporting
+  // ended:true once *any* video on the page finishes. That made it jump ahead
+  // mid-episode, on a resume seek, or after skipping credits. Episode changes
+  // are user-driven: the Prev/Next buttons and the episode list sidebar.
   const handleEnded = useCallback(async () => {
     const s = mediaType === 'movie' ? 0 : currentSeason
     const e = mediaType === 'movie' ? 0 : currentEpisode
 
     await window.api.toggleMediaEpisodeCompleted(tmdbId, mediaType, s, e, true)
-
-    if (mediaType === 'tv') {
-      const nextEp = seasonDetail?.episodes?.find(
-        (ep) => ep.episode_number === currentEpisode + 1
-      )
-      if (nextEp) {
-        navigate(`/movies/watch/tv/${tmdbId}/${currentSeason}/${nextEp.episode_number}`, {
-          replace: true
-        })
-      } else {
-        const nextSeasonNum = currentSeason + 1
-        const hasNextSeason = tvShow?.seasons?.some(
-          (sv) => sv.season_number === nextSeasonNum
-        )
-        if (hasNextSeason) {
-          navigate(`/movies/watch/tv/${tmdbId}/${nextSeasonNum}/1`, { replace: true })
-        }
-      }
-    }
-  }, [tmdbId, mediaType, currentSeason, currentEpisode, seasonDetail, tvShow, navigate])
+  }, [tmdbId, mediaType, currentSeason, currentEpisode])
 
   /* -- Navigation helpers ------------------------------------------------ */
   function handlePrevEpisode(): void {
@@ -551,6 +560,7 @@ export default function MoviesWatchPage(): JSX.Element {
               onProgress={handleProgress}
               onEnded={handleEnded}
               onLoadError={handleLoadError}
+              onPlayerReady={handlePlayerReady}
               onError={(msg) => console.error('[MoviesWatchPage] Embed error:', msg)}
             />
           )}

@@ -19,6 +19,12 @@ mac:
     - dmg
     - zip
   entitlementsInherit: build/entitlements.mac.plist
+  # Ad-hoc sign. The only cert in the keychain is an "Apple Development"
+  # identity, which cannot notarize; electron-builder would otherwise
+  # auto-discover it and sign for distribution with the hardened runtime,
+  # which this app (webview + disablewebsecurity) has never been tested under.
+  # Set this to a "Developer ID Application" identity if one is ever added.
+  identity: null
 win:
   target:
     - nsis

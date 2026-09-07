@@ -85,6 +85,16 @@ function setCache<T>(key: string, data: T, ttl = DEFAULT_TTL): void {
 
 // ─── Fetch helper ────────────────────────────────────────────
 
+/**
+ * Requests currently on the wire, keyed by URL.
+ *
+ * The cache only helps once a response has landed. Home mounts a dozen rows at
+ * once and the search surface asks three catalogues for counts, so identical
+ * requests were routinely in flight together and each one hit the network.
+ * Callers now share a single promise.
+ */
+const inFlight = new Map<string, Promise<unknown>>()
+
 async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   const apiKey = await getApiKey()
   if (!apiKey) throw new TmdbApiKeyMissingError()
@@ -95,6 +105,17 @@ async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): 
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v)
   }
+
+  const dedupeKey = url.toString()
+  const existing = inFlight.get(dedupeKey)
+  if (existing) return existing as Promise<T>
+
+  const request = doFetch<T>(url).finally(() => inFlight.delete(dedupeKey))
+  inFlight.set(dedupeKey, request)
+  return request
+}
+
+async function doFetch<T>(url: URL): Promise<T> {
 
   const maxRetries = 3
   for (let attempt = 1; attempt <= maxRetries; attempt++) {

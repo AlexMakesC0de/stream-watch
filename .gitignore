@@ -8,3 +8,7 @@ dist/
 Thumbs.db
 .env
 .env.local
+
+# Impeccable working artifacts (review screenshots are large)
+.impeccable/review/
+.impeccable/decision-payload.json

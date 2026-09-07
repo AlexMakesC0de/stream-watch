@@ -84,8 +84,29 @@ export default function VideoPlayer({
 
     if (src.includes('.m3u8') && Hls.isSupported()) {
       const hls = new Hls({
-        enableWorker: false, // Avoid worker security context issues in Electron
+        // Demux and remux in a Web Worker. With this off, every segment was
+        // transmuxed on the main thread, competing with React renders and
+        // image decodes — which is what the stutter actually was. hls.js
+        // builds the worker from a same-origin blob and falls back to inline
+        // demuxing on its own if the worker cannot start, so the failure mode
+        // is today's behaviour rather than a broken player.
+        enableWorker: true,
         lowLatencyMode: false,
+
+        // Desktop app on a real connection: buffer far more aggressively than
+        // the web defaults, so a slow segment cannot starve playback.
+        maxBufferLength: 60, // seconds ahead (default 30)
+        maxMaxBufferLength: 180, // ceiling when bandwidth allows
+        maxBufferSize: 120 * 1000 * 1000, // 120MB (default 60MB)
+        backBufferLength: 60, // keep a minute behind for instant seek-back,
+        // instead of the default unbounded growth
+
+        // Third-party CDNs drop segments regularly; retry a bit harder before
+        // surfacing an error and sending the user hunting for another source.
+        fragLoadingMaxRetry: 6,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingMaxRetry: 4,
+
         xhrSetup: (xhr) => {
           xhr.withCredentials = false
         }

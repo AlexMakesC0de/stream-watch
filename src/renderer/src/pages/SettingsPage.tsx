@@ -16,9 +16,12 @@ import {
   EyeOff,
   ExternalLink,
   Loader2,
-  Database
+  Database,
+  Keyboard
 } from 'lucide-react'
 import { setTmdbApiKey } from '@/services/tmdb'
+import KeybindSettings from '@/components/KeybindSettings'
+import { parseKeybinds, defaultKeybinds, type KeybindMap } from '@/lib/keybinds'
 
 const COLOR_PRESETS = [
   { name: 'Purple', value: '#6c5ce7' },
@@ -106,6 +109,7 @@ export default function SettingsPage(): JSX.Element {
 
   // Data sources
   const [tmdbKey, setTmdbKey] = useState('')
+  const [keybinds, setKeybinds] = useState<KeybindMap>(defaultKeybinds())
   const [showKey, setShowKey] = useState(false)
   const [customProviders, setCustomProviders] = useState<CustomProvider[]>([])
   const [popcornMirrors, setPopcornMirrors] = useState('')
@@ -119,6 +123,7 @@ export default function SettingsPage(): JSX.Element {
     setAccentColor(s.accentColor || '#6c5ce7')
     setMovieAccentColor(s.movieAccentColor || '#e50914')
     setTmdbKey(s.tmdbApiKey || '')
+    setKeybinds(parseKeybinds(s.keybinds))
     setPopcornMirrors(mirrorsToText(s.popcornMirrors || ''))
     try {
       const parsed = JSON.parse(s.customEmbedProviders || '[]')
@@ -169,8 +174,10 @@ export default function SettingsPage(): JSX.Element {
     await window.api.setSetting('tmdbApiKey', tmdbKey.trim())
     await window.api.setSetting('customEmbedProviders', JSON.stringify(cleanedProviders))
     await window.api.setSetting('popcornMirrors', mirrorsCsv)
+    await window.api.setSetting('keybinds', JSON.stringify(keybinds))
 
     setTmdbApiKey(tmdbKey.trim()) // apply the key live, no restart needed
+    window.dispatchEvent(new Event('streamwatch:settings-changed'))
     setCustomProviders(cleanedProviders)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -465,6 +472,15 @@ export default function SettingsPage(): JSX.Element {
             One mirror per line. Used to fetch torrent sources; tried in order with failover.
           </p>
         </div>
+      </section>
+
+      {/* Shortcuts */}
+      <section className="bg-dark-900 rounded-xl p-6 space-y-6">
+        <div className="flex items-center gap-3 text-white">
+          <Keyboard size={20} className="text-accent-light" />
+          <h2 className="text-lg font-semibold">Shortcuts</h2>
+        </div>
+        <KeybindSettings value={keybinds} onChange={setKeybinds} />
       </section>
 
       {/* Library & Backup */}

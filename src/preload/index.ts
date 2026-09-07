@@ -18,6 +18,8 @@ const api = {
   getEpisodeProgress: (anilistId: number, episodeNumber: number) =>
     ipcRenderer.invoke('db:get-episode-progress', anilistId, episodeNumber),
   getContinueWatching: () => ipcRenderer.invoke('db:get-continue-watching'),
+  removeAnimeFromContinueWatching: (anilistId: number) =>
+    ipcRenderer.invoke('db:remove-anime-continue-watching', anilistId),
   toggleEpisodeCompleted: (anilistId: number, episodeNumber: number, completed: boolean) =>
     ipcRenderer.invoke('db:toggle-episode-completed', anilistId, episodeNumber, completed),
   markAllEpisodesCompleted: (anilistId: number, totalEpisodes: number) =>
@@ -45,6 +47,8 @@ const api = {
   getMediaEpisodeProgress: (tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null) =>
     ipcRenderer.invoke('db:get-media-episode-progress', tmdbId, mediaType, seasonNumber, episodeNumber),
   getMediaContinueWatching: () => ipcRenderer.invoke('db:get-media-continue-watching'),
+  removeMediaFromContinueWatching: (tmdbId: number, mediaType: string) =>
+    ipcRenderer.invoke('db:remove-media-continue-watching', tmdbId, mediaType),
   toggleMediaEpisodeCompleted: (tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null, completed: boolean) =>
     ipcRenderer.invoke('db:toggle-media-episode-completed', tmdbId, mediaType, seasonNumber, episodeNumber, completed),
 

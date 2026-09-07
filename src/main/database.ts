@@ -593,6 +593,35 @@ export function getMediaContinueWatching(): Record<string, unknown>[] {
   )
 }
 
+/**
+ * Drops a title out of Continue Watching by forgetting its unfinished
+ * positions. Episodes already marked completed keep that flag, so watch
+ * history survives — only the "resume from here" markers are removed, which
+ * is what getMediaContinueWatching() keys off.
+ */
+/**
+ * Anime counterpart of removeMediaFromContinueWatching: forgets unfinished
+ * positions so a title drops out of Continue Watching, while episodes already
+ * marked completed keep that flag.
+ */
+export function removeAnimeFromContinueWatching(anilistId: number): void {
+  execute(
+    `DELETE FROM watch_progress
+     WHERE completed = 0
+       AND anime_id = (SELECT id FROM anime WHERE anilist_id = ?)`,
+    [anilistId]
+  )
+}
+
+export function removeMediaFromContinueWatching(tmdbId: number, mediaType: string): void {
+  execute(
+    `DELETE FROM media_watch_progress
+     WHERE completed = 0
+       AND media_id = (SELECT id FROM media WHERE tmdb_id = ? AND media_type = ?)`,
+    [tmdbId, mediaType]
+  )
+}
+
 export function toggleMediaEpisodeCompleted(
   tmdbId: number,
   mediaType: string,

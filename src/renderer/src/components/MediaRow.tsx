@@ -58,15 +58,14 @@ export default function MediaRow({
       {/* Header */}
       <div className="flex items-center justify-between mb-3 pr-1">
         <div className="flex items-center gap-2.5">
-          {badge ? (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-accent/15 text-accent text-xs font-extrabold uppercase tracking-wider">
+          {Icon && !badge && <Icon size={17} className="text-accent-light shrink-0" />}
+          {badge && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-accent/20 text-accent-light text-xs font-bold uppercase tracking-wider">
               {Icon && <Icon size={13} />}
               {badge}
             </span>
-          ) : (
-            Icon && <Icon size={20} className="text-accent" />
           )}
-          <h2 className="text-xl font-bold text-white">{title}</h2>
+          <h2 className="text-[17px] font-semibold text-white">{title}</h2>
         </div>
         <div className="flex items-center gap-2">
           {headerRight}
@@ -109,8 +108,8 @@ export default function MediaRow({
               >
                 {ranked && (
                   <span
-                    className="text-[5rem] leading-[0.8] font-black text-dark-900 -mr-4 select-none"
-                    style={{ WebkitTextStroke: '2px #4c4d52' }}
+                    className="text-[5rem] leading-[0.8] font-black text-dark-950 -mr-4 select-none tabular"
+                    style={{ WebkitTextStroke: '2px #2b3140' }}
                   >
                     {i + 1}
                   </span>

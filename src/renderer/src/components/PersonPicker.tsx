@@ -51,12 +51,21 @@ export default function PersonPicker({ value, onChange, disabled }: PersonPicker
     return () => clearTimeout(t)
   }, [query, open])
 
+  // Both states share the sibling filter controls' box exactly — same padding,
+  // radius, border and text size — so the row lines up on one baseline.
+  const boxCls =
+    'flex items-center gap-2 bg-dark-800 text-sm rounded-lg pl-3 pr-2.5 py-2 border transition-colors'
+
   if (value) {
     return (
-      <span className="inline-flex items-center gap-1.5 bg-accent/15 text-accent text-sm rounded-lg px-2.5 py-1.5 border border-accent/30">
+      <span className={`${boxCls} border-accent text-white`}>
         <User size={14} />
         <span className="max-w-[10rem] truncate">{value.name}</span>
-        <button onClick={() => onChange(null)} className="hover:text-white" aria-label="Clear actor">
+        <button
+          onClick={() => onChange(null)}
+          className="text-dark-300 hover:text-white transition-colors"
+          aria-label="Clear actor"
+        >
           <X size={14} />
         </button>
       </span>
@@ -68,9 +77,8 @@ export default function PersonPicker({ value, onChange, disabled }: PersonPicker
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
-        className="flex items-center gap-1.5 bg-dark-800 text-dark-200 text-sm rounded-lg px-3 py-1.5
-                   border border-dark-700 hover:bg-dark-700 transition-colors
-                   disabled:opacity-40 disabled:cursor-not-allowed"
+        className={`${boxCls} border-dark-700 text-dark-100 hover:border-dark-600
+                    disabled:opacity-40 disabled:cursor-not-allowed`}
       >
         <User size={14} />
         Actor

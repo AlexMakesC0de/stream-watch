@@ -116,15 +116,46 @@ export default function MoviesLibraryPage(): JSX.Element {
   return (
     <div className="p-6">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4">
         {StatusIcon && (
           <StatusIcon
             size={24}
-            className={status ? STATUS_CONFIG[status]?.color : 'text-accent'}
+            className={status ? STATUS_CONFIG[status]?.color : 'text-accent-light'}
           />
         )}
         <h1 className="text-2xl font-bold text-white">{pageTitle}</h1>
-        <span className="text-dark-500 text-sm">({library.length} titles)</span>
+        <span className="text-dark-500 text-sm tabular">({library.length} titles)</span>
+      </div>
+
+      {/* Status filters. These used to live in the sidebar; with the sidebar
+          gone they belong on the surface they actually filter. */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-6 border-b border-dark-700 pb-3">
+        <button
+          onClick={() => navigate('/movies/library')}
+          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+            !status ? 'bg-dark-700 text-white font-medium' : 'text-dark-300 hover:text-white hover:bg-dark-800'
+          }`}
+        >
+          All
+        </button>
+        {Object.entries(STATUS_CONFIG).map(([key, cfg]) => {
+          const Icon = cfg.icon
+          const active = status === key
+          return (
+            <button
+              key={key}
+              onClick={() => navigate(`/movies/library/${key}`)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                active
+                  ? 'bg-dark-700 text-white font-medium'
+                  : 'text-dark-300 hover:text-white hover:bg-dark-800'
+              }`}
+            >
+              <Icon size={14} className={cfg.color} />
+              {cfg.label}
+            </button>
+          )
+        })}
       </div>
 
       {/* List */}

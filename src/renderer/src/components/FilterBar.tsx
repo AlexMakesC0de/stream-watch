@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Film, Tv, Check } from 'lucide-react'
+import { ChevronDown, Film, Tv, Check, X } from 'lucide-react'
 import { getGenreList } from '@/services/tmdb'
 import PersonPicker, { type SelectedPerson } from './PersonPicker'
 import type { MediaType, TMDBGenre } from '@/types'
@@ -76,7 +76,46 @@ export default function FilterBar({ filters, onChange, searchMode }: FilterBarPr
     <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-dark-400 pointer-events-none" />
   )
 
+  // What's currently narrowing the results, as individually removable chips.
+  // Without these you can stack four filters and have no idea which one is
+  // hiding the thing you're looking for.
+  const chips: { key: string; label: string; clear: () => void }[] = []
+  if (!searchMode) {
+    filters.genres.forEach((id) => {
+      chips.push({
+        key: `genre-${id}`,
+        label: genreList.find((g) => g.id === id)?.name ?? 'Genre',
+        clear: () => toggleGenre(id)
+      })
+    })
+    if (filters.year) {
+      chips.push({ key: 'year', label: String(filters.year), clear: () => onChange({ year: null }) })
+    }
+    if (filters.minRating > 0) {
+      chips.push({
+        key: 'rating',
+        label: `${filters.minRating}+ ★`,
+        clear: () => onChange({ minRating: 0 })
+      })
+    }
+    if (filters.sortBy !== 'popular') {
+      chips.push({
+        key: 'sort',
+        label: SORT_OPTIONS.find((o) => o.value === filters.sortBy)?.label ?? 'Sorted',
+        clear: () => onChange({ sortBy: 'popular' })
+      })
+    }
+    if (filters.cast) {
+      chips.push({ key: 'cast', label: filters.cast.name, clear: () => onChange({ cast: null }) })
+    }
+  }
+
+  function clearAll(): void {
+    onChange({ genres: [], year: null, sortBy: 'popular', minRating: 0, cast: null })
+  }
+
   return (
+    <div className="space-y-2">
     <div className="flex flex-wrap items-center gap-2">
       {/* Type toggle */}
       <div className="flex items-center bg-dark-800 rounded-lg border border-dark-700 p-0.5">
@@ -185,6 +224,32 @@ export default function FilterBar({ filters, onChange, searchMode }: FilterBarPr
         onChange={(p) => onChange({ cast: p })}
         disabled={searchMode}
       />
+    </div>
+
+      {chips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {chips.map((c) => (
+            <button
+              key={c.key}
+              onClick={c.clear}
+              title={`Remove ${c.label}`}
+              className="flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full text-xs font-medium
+                         bg-accent/15 text-accent hover:bg-accent/25 transition-colors"
+            >
+              {c.label}
+              <X size={12} />
+            </button>
+          ))}
+          {chips.length > 1 && (
+            <button
+              onClick={clearAll}
+              className="ml-1 text-xs text-dark-400 hover:text-white transition-colors"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

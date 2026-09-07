@@ -5,21 +5,23 @@
 /* ─── Mode Themes ──────────────────────────────────────── */
 
 :root {
-  --color-accent: #6c5ce7;
-  --color-accent-hover: #7c6ff0;
-  --color-accent-light: #a29bfe;
-  --color-accent-dark: #5a4bd1;
+  --color-accent: #0063e5;
+  --color-accent-hover: #1f7bff;
+  /* Text-safe accent: #0063E5 is only 3.6:1 on the ground, fine for fills and
+     large type but not for body copy. Anything small and blue uses -light. */
+  --color-accent-light: #4d93ff;
+  --color-accent-dark: #0049a8;
 }
 
 @layer base {
   * {
     scrollbar-width: thin;
-    scrollbar-color: #4c4d52 transparent;
+    scrollbar-color: #2b3140 transparent;
   }
 
   *::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   *::-webkit-scrollbar-track {
@@ -27,12 +29,35 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background-color: #4c4d52;
-    border-radius: 3px;
+    background-color: #2b3140;
+    border-radius: 4px;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background-color: #696a71;
+    background-color: #3d4557;
+  }
+
+  /* The surfaces we did not draw still carry the design. */
+  ::selection {
+    background-color: var(--color-accent);
+    color: #ffffff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent-light);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  input,
+  textarea {
+    caret-color: var(--color-accent-light);
+  }
+
+  /* Runtimes and counters line up instead of jittering per digit. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
   }
 }
 
@@ -45,14 +70,27 @@
     -webkit-app-region: no-drag;
   }
 
+  /* The poster is the tile. Its caption sits on the page ground, not inside a
+     filled slab — so a row reads as artwork with labels under it, the way the
+     majors do it. Only the art takes the lift and the white edge. */
   .anime-card {
-    @apply relative overflow-hidden rounded-lg bg-dark-900 transition-all duration-200;
+    @apply relative;
+    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .card-art {
+    @apply relative overflow-hidden rounded-lg bg-dark-800;
+    transition: box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .anime-card:hover {
-    @apply ring-2;
-    --tw-ring-color: var(--color-accent);
-    --tw-ring-opacity: 0.5;
+    transform: translateY(-4px);
+  }
+
+  .anime-card:hover .card-art {
+    box-shadow:
+      0 0 0 2px rgba(245, 247, 250, 0.92),
+      0 18px 34px -14px rgba(0, 0, 0, 0.85);
   }
 
   .anime-card:hover .anime-card-overlay {
@@ -64,13 +102,20 @@
   }
 
   .btn-primary {
-    @apply bg-accent hover:bg-accent-hover text-white font-medium px-4 py-2 rounded-lg
+    @apply bg-accent hover:bg-accent-hover text-white font-medium px-4 py-2 rounded-md
+           transition-colors duration-150 flex items-center gap-2;
+  }
+
+  /* Over key art the canon plays it white-on-dark, not brand-coloured — the
+     poster supplies the colour, the button supplies the contrast. */
+  .btn-hero {
+    @apply bg-dark-50 hover:bg-white text-dark-950 font-semibold px-6 py-2.5 rounded-md
            transition-colors duration-150 flex items-center gap-2;
   }
 
   .btn-secondary {
-    @apply bg-dark-800 hover:bg-dark-700 text-white font-medium px-4 py-2 rounded-lg
-           transition-colors duration-150 flex items-center gap-2;
+    @apply bg-white/10 hover:bg-white/20 text-white font-medium px-4 py-2 rounded-md
+           border border-white/25 transition-colors duration-150 flex items-center gap-2;
   }
 
   .btn-ghost {
@@ -90,5 +135,44 @@
 
   .progress-bar-fill {
     @apply h-full bg-accent rounded-full transition-all duration-300;
+  }
+
+  /* Hero auto-advance timer. Scales from empty to full, anchored left —
+     transform stays on the compositor, unlike animating width. The slide
+     advances on animationend, so the bar *is* the timer: pausing the
+     animation pauses rotation and the two can't drift apart. */
+  .hero-timer-fill {
+    transform-origin: left center;
+    animation-name: hero-timer;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes paletteIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes hero-timer {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* No animation means animationend never fires, so the hero simply stops
+   auto-rotating — navigate it with the poster thumbnails instead. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-timer-fill {
+    animation: none;
+    transform: scaleX(0);
   }
 }

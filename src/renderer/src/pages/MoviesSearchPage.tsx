@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, Compass } from 'lucide-react'
+import { Search, Compass, Sparkles, X } from 'lucide-react'
 import MediaGrid from '@/components/MediaGrid'
 import FilterBar, { type DiscoverFilters } from '@/components/FilterBar'
-import { searchMovies, searchTvShows, discoverMedia } from '@/services/tmdb'
+import { discoverMedia } from '@/services/tmdb'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
-import type { TMDBMovie, TMDBTvShow, TMDBMediaItem, MediaType } from '@/types'
+import type { TMDBMovie, TMDBTvShow, TMDBMediaItem, MediaType, AniListAnime } from '@/types'
 
 type AnyMedia = TMDBMovie | TMDBTvShow | TMDBMediaItem
 
@@ -27,8 +27,6 @@ function sortByParam(key: DiscoverFilters['sortBy'], type: MediaType): string {
 export default function MoviesSearchPage(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [query, setQuery] = useState('')
-  const [debouncedQuery, setDebouncedQuery] = useState('')
 
   // Filters live in the URL (single source of truth). Deriving them from the
   // query string — rather than seeding a separate state once — means a removal
@@ -64,29 +62,25 @@ export default function MoviesSearchPage(): JSX.Element {
     setSearchParams(params, { replace: true })
   }
 
+  // Clearing every filter but the media type. Gives the empty state something
+  // actionable to offer instead of a dead end.
+  function clearFilters(): void {
+    setSearchParams({ type: filters.type }, { replace: true })
+  }
+
+  const hasActiveFilters =
+    filters.genres.length > 0 || !!filters.year || filters.minRating > 0 || !!filters.cast
+
   const [results, setResults] = useState<AnyMedia[]>([])
   const [pageNum, setPageNum] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [loading, setLoading] = useState(false)
+  // Starts true so the first paint shows skeletons, not a flash of "no results".
+  const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
 
-  // Debounce the title query so we don't fire a search every keystroke.
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(query.trim()), 400)
-    return () => clearTimeout(t)
-  }, [query])
-
-  const searchMode = debouncedQuery.length > 0
 
   const fetchPageData = useCallback(
     async (page: number): Promise<{ results: AnyMedia[]; total_pages: number }> => {
-      if (searchMode) {
-        const data =
-          filters.type === 'movie'
-            ? await searchMovies(debouncedQuery, page)
-            : await searchTvShows(debouncedQuery, page)
-        return { results: data.results, total_pages: data.total_pages }
-      }
       const data = await discoverMedia({
         type: filters.type,
         genres: filters.genres,
@@ -98,7 +92,7 @@ export default function MoviesSearchPage(): JSX.Element {
       })
       return { results: data.results, total_pages: data.total_pages }
     },
-    [searchMode, debouncedQuery, filters]
+    [filters]
   )
 
   // Reset + load page 1 whenever the query or filters change.
@@ -143,49 +137,38 @@ export default function MoviesSearchPage(): JSX.Element {
 
   const sentinelRef = useInfiniteScroll(loadMore, { hasMore, loading: loading || loadingMore })
 
-  const heading = searchMode
-    ? `Results for “${debouncedQuery}”`
-    : filters.cast
+
+
+  const heading = filters.cast
       ? `${filters.type === 'movie' ? 'Movies' : 'TV shows'} with ${filters.cast.name}`
       : `Browse ${filters.type === 'movie' ? 'Movies' : 'TV Shows'}`
 
   return (
     <div className="p-6">
-      {/* Search bar */}
-      <div className="relative mb-4">
-        <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-dark-400" />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search movies & TV shows by title…"
-          className="w-full pl-11 pr-4 py-3 bg-dark-900 border border-dark-800 rounded-xl
-                     text-white placeholder:text-dark-500 focus:outline-none focus:border-accent
-                     transition-colors"
-          autoFocus
-        />
-      </div>
-
       {/* Filters */}
-      <FilterBar filters={filters} onChange={patchFilters} searchMode={searchMode} />
-      {searchMode && (
-        <p className="text-xs text-dark-500 mt-2">
-          Filters apply when browsing — clear the search box to use genre, year, sort & actor.
-        </p>
-      )}
+      <FilterBar filters={filters} onChange={patchFilters} searchMode={false} />
 
-      {/* Heading */}
       <div className="flex items-center gap-2 mt-6 mb-4">
-        {searchMode ? (
-          <Search size={20} className="text-accent" />
-        ) : (
-          <Compass size={20} className="text-accent" />
-        )}
+        <Compass size={20} className="text-accent-light" />
         <h2 className="text-xl font-bold text-white">{heading}</h2>
       </div>
 
       {/* Results */}
-      <MediaGrid media={results} loading={loading} />
+      <MediaGrid
+        media={results}
+        loading={loading}
+        emptyTitle={
+'Nothing matches these filters'
+        }
+        emptyHint="Try removing a genre, widening the year, or lowering the minimum rating."
+        emptyAction={
+          hasActiveFilters ? (
+            <button onClick={clearFilters} className="btn-primary mt-4 mx-auto">
+              Clear filters
+            </button>
+          ) : undefined
+        }
+      />
 
       {/* Infinite-scroll sentinel + loader */}
       {hasMore && <div ref={sentinelRef} className="h-1" />}

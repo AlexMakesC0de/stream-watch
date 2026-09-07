@@ -11,6 +11,8 @@ interface EmbedPlayerProps {
   onEnded?: () => void
   onError?: (message: string) => void
   onLoadError?: (info: { code: number; description: string; url: string }) => void
+  /** Fires once a real player is detected — the signal that this source works. */
+  onPlayerReady?: () => void
 }
 
 /**
@@ -27,7 +29,8 @@ export default function EmbedPlayer({
   disableInteractions = false,
   onProgress,
   onEnded,
-  onLoadError
+  onLoadError,
+  onPlayerReady
 }: EmbedPlayerProps): JSX.Element {
   const webviewRef = useRef<Electron.WebviewTag | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -306,22 +309,40 @@ export default function EmbedPlayer({
           iframePatched = true;
         }
 
-        // Poll for video element and keep retrying play until it works
+        // Poll for a video element and start it — but every action here has to
+        // be idempotent. Play controls on JW Player and Video.js are the SAME
+        // element as the pause control once playback starts, and video.click()
+        // toggles on most players. Clicking them unconditionally every 500ms
+        // paused whatever the outer nudger had just started, which is the
+        // endless play/pause flip on slow-loading sources.
         let playing = false;
+        const stop = function() { clearInterval(checkInterval); };
+
         const checkInterval = setInterval(() => {
-          if (playing) { clearInterval(checkInterval); return; }
+          const video = findVideo();
+
+          // Playing already? Nothing left to do, and anything we click from
+          // here can only stop it.
+          if (video && !video.paused && !video.ended && video.readyState >= 2) {
+            playing = true;
+            stop();
+            return;
+          }
+          if (playing) { stop(); return; }
 
           patchIframeAutoplay();
 
-          // Also try clicking any play button overlays the player might have
-          const playBtns = document.querySelectorAll(
-            '.jw-icon-playback, .vjs-big-play-button, .plyr__control--overlaid, ' +
-            'button[aria-label="Play"], [class*="play-button"], [class*="play_button"], ' +
-            '[class*="playBtn"], .btn-play, #play-btn'
-          );
-          playBtns.forEach(function(btn) { btn.click(); });
+          // Only reach for a play control while there is genuinely nothing
+          // playing — never as a blind repeat.
+          if (!video || video.paused) {
+            const playBtns = document.querySelectorAll(
+              '.jw-icon-playback, .vjs-big-play-button, .plyr__control--overlaid, ' +
+              'button[aria-label="Play"], [class*="play-button"], [class*="play_button"], ' +
+              '[class*="playBtn"], .btn-play, #play-btn'
+            );
+            playBtns.forEach(function(btn) { btn.click(); });
+          }
 
-          const video = findVideo();
           if (!video) return;
 
           // Set initial time or nudge to 0.1s to trigger loading
@@ -337,21 +358,22 @@ export default function EmbedPlayer({
           // sound shortly after — otherwise streams stay silent forever.
           var p = video.play();
           if (p && p.then) {
-            p.then(function() { playing = true; }).catch(function() {
+            p.then(function() { playing = true; stop(); }).catch(function() {
               video.muted = true;
               video.play().then(function() {
                 playing = true;
+                stop();
                 setTimeout(function() { try { video.muted = false; } catch (e) {} }, 500);
               }).catch(function() {});
             });
           }
-
-          // Also dispatch a click on the video in case the player needs it
-          video.click();
         }, 500);
 
+        // Stop poking the player the moment it reports playback, from any path.
+        document.addEventListener('play', function() { playing = true; stop(); }, true);
+
         // Clean up after 30 seconds
-        setTimeout(() => clearInterval(checkInterval), 30000);
+        setTimeout(stop, 30000);
       })();
     `
     webview.executeJavaScript(initScript).catch(() => {})
@@ -425,7 +447,7 @@ export default function EmbedPlayer({
 
     let elapsed = 0
     const STEP = 2000
-    const GRACE_MS = 14000
+    const GRACE_MS = 9000
     const timer = window.setInterval(() => {
       elapsed += STEP
       webview
@@ -454,6 +476,7 @@ export default function EmbedPlayer({
         .then((res: string) => {
           if (res === 'PLAYER') {
             window.clearInterval(timer)
+            onPlayerReady?.()
             return
           }
           if (res.indexOf('ERR:') === 0) {
@@ -474,7 +497,7 @@ export default function EmbedPlayer({
     }, STEP)
 
     return () => window.clearInterval(timer)
-  }, [isLoading, reportLoadError, src])
+  }, [isLoading, reportLoadError, src, onPlayerReady])
 
   // Handle webview fullscreen requests (e.g. user clicks fullscreen button inside the video)
   useEffect(() => {
@@ -644,39 +667,60 @@ export default function EmbedPlayer({
     if (!webview) return
 
     let attemptCount = 0
+    let stopped = false
     const maxAttempts = 8
+    // Every chained retry, so switching source cannot leave an orphan loop
+    // still clicking into the new page. Previously only the first was cleared.
+    const timers = new Set<number>()
 
-    const runAttempt = (): void => {
-      if (attemptCount >= maxAttempts) return
-      attemptCount += 1
-
-      dispatchAutoplayGesture()
-
-      webview.executeJavaScript(`
-        (function() {
-          const video = document.querySelector('video');
-          if (!video) return false;
-          if (video.paused) {
-            try {
-              if (video.currentTime < 0.1) video.currentTime = 0.1;
-              video.play();
-            } catch {}
-          }
-          return !video.paused;
-        })();
-      `).then((isPlaying: boolean) => {
-        if (!isPlaying && attemptCount < maxAttempts) {
-          window.setTimeout(runAttempt, 700)
-        }
-      }).catch(() => {
-        if (attemptCount < maxAttempts) {
-          window.setTimeout(runAttempt, 700)
-        }
-      })
+    const schedule = (fn: () => void, ms: number): void => {
+      const id = window.setTimeout(() => {
+        timers.delete(id)
+        if (!stopped) fn()
+      }, ms)
+      timers.add(id)
     }
 
-    const timeoutId = window.setTimeout(runAttempt, 900)
-    return () => window.clearTimeout(timeoutId)
+    const runAttempt = (): void => {
+      if (stopped || attemptCount >= maxAttempts) return
+      attemptCount += 1
+
+      // Look before poking. The gesture is a centre click plus Space, and both
+      // TOGGLE — firing them at a video that is already playing pauses it, then
+      // the next attempt plays it again. That fight is the flip.
+      webview
+        .executeJavaScript(`
+          (function() {
+            const v = document.querySelector('video');
+            if (!v) return 'none';
+            if (!v.paused && !v.ended && v.readyState >= 2) return 'playing';
+            try {
+              if (v.currentTime < 0.1) v.currentTime = 0.1;
+              v.play();
+            } catch (e) {}
+            return v.paused ? 'paused' : 'playing';
+          })();
+        `)
+        .then((state: string) => {
+          if (state === 'playing') {
+            stopped = true // never gesture at a running video
+            return
+          }
+          // Only now, with nothing playing, is a synthetic gesture safe.
+          dispatchAutoplayGesture()
+          if (attemptCount < maxAttempts) schedule(runAttempt, 700)
+        })
+        .catch(() => {
+          if (attemptCount < maxAttempts) schedule(runAttempt, 700)
+        })
+    }
+
+    schedule(runAttempt, 900)
+    return () => {
+      stopped = true
+      timers.forEach((id) => window.clearTimeout(id))
+      timers.clear()
+    }
   }, [src, dispatchAutoplayGesture])
 
   return (
@@ -685,8 +729,10 @@ export default function EmbedPlayer({
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center z-10 bg-black">
           <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500" />
-            <p className="text-sm text-gray-400">Loading player...</p>
+            {/* Matches the spinner used everywhere else; this one still had a
+                hardcoded blue and grey from before the palette change. */}
+            <div className="animate-spin h-10 w-10 rounded-full border-2 border-accent border-t-transparent" />
+            <p className="text-sm text-dark-400">Loading player…</p>
           </div>
         </div>
       )}

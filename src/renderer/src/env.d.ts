@@ -25,6 +25,7 @@ interface AnimeWatchAPI {
   getProgress: (anilistId: number) => Promise<unknown[]>
   getEpisodeProgress: (anilistId: number, episodeNumber: number) => Promise<unknown>
   getContinueWatching: () => Promise<unknown[]>
+  removeAnimeFromContinueWatching: (anilistId: number) => Promise<unknown>
   toggleEpisodeCompleted: (anilistId: number, episodeNumber: number, completed: boolean) => Promise<void>
   markAllEpisodesCompleted: (anilistId: number, totalEpisodes: number) => Promise<void>
   fetchEpisodeSources: (opts: {
@@ -45,6 +46,7 @@ interface AnimeWatchAPI {
   getMediaProgress: (tmdbId: number, mediaType: string) => Promise<unknown[]>
   getMediaEpisodeProgress: (tmdbId: number, mediaType: string, seasonNumber: number, episodeNumber: number) => Promise<unknown>
   getMediaContinueWatching: () => Promise<unknown[]>
+  removeMediaFromContinueWatching: (tmdbId: number, mediaType: string) => Promise<unknown>
   toggleMediaEpisodeCompleted: (tmdbId: number, mediaType: string, seasonNumber: number | null, episodeNumber: number | null, completed: boolean) => Promise<unknown>
   minimizeWindow: () => void
   maximizeWindow: () => void

@@ -14,12 +14,14 @@ import {
   Rocket,
   Ghost,
   Sparkles,
-  KeyRound,
+  X,
   type LucideIcon
 } from 'lucide-react'
 import HeroSlideshow from '@/components/HeroSlideshow'
 import LazyMediaRow from '@/components/LazyMediaRow'
 import ProviderRow from '@/components/ProviderRow'
+import TmdbKeySetup from '@/components/TmdbKeySetup'
+import { formatTimeLeft, progressPercent } from '@/lib/time'
 import {
   getTrending,
   getPopularMovies,
@@ -29,6 +31,7 @@ import {
   getOnTheAirTvShows,
   discoverMoviesByGenre,
   posterUrl,
+  backdropUrl,
   isTmdbApiKeyConfigured
 } from '@/services/tmdb'
 import type {
@@ -106,30 +109,29 @@ export default function MoviesHomePage(): JSX.Element {
     setChecking(false)
   }
 
-  const formatTime = (seconds: number): string => {
-    const m = Math.floor(seconds / 60)
-    const s = Math.floor(seconds % 60)
-    return `${m}:${s.toString().padStart(2, '0')}`
+  // Drop a title out of Continue Watching. Optimistic: hide it right away,
+  // then persist — and put it back if the write fails.
+  async function handleRemoveFromContinue(
+    e: React.MouseEvent,
+    item: MediaContinueWatchingItem
+  ): Promise<void> {
+    e.stopPropagation()
+    const previous = continueWatching
+    setContinueWatching((list) =>
+      list.filter((i) => !(i.tmdb_id === item.tmdb_id && i.media_type === item.media_type))
+    )
+    try {
+      await window.api.removeMediaFromContinueWatching(item.tmdb_id, item.media_type)
+    } catch {
+      setContinueWatching(previous)
+    }
   }
 
-  // No API key → prompt, don't render rows (they'd all fail).
+  // No API key → this *is* the first-run experience for production builds, so
+  // give it a real screen that takes the key inline instead of a banner that
+  // punts to Settings. Rows would all fail without it, so don't render them.
   if (keyMissing && !checking) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3">
-          <p className="text-amber-300 text-sm flex items-center gap-2">
-            <KeyRound size={15} />
-            Add your TMDB API key to load Movies &amp; TV.
-          </p>
-          <button
-            onClick={() => navigate('/movies/settings')}
-            className="text-sm text-accent hover:text-accent/80 transition-colors"
-          >
-            Open Settings
-          </button>
-        </div>
-      </div>
-    )
+    return <TmdbKeySetup onSaved={loadData} />
   }
 
   return (
@@ -144,46 +146,72 @@ export default function MoviesHomePage(): JSX.Element {
             <Play size={20} className="text-accent" />
             <h2 className="text-xl font-bold text-white">Continue Watching</h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {/* Landscape 16:9 cards in a scrolling row — matches the rhythm of
+              every other row on the page, and a still frame says more about
+              where you are than a show poster does. */}
+          <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">
             {continueWatching.map((item) => {
               const watchPath = item.media_type === 'movie'
                 ? `/movies/watch/movie/${item.tmdb_id}`
                 : `/movies/watch/tv/${item.tmdb_id}/${item.last_season || 1}/${item.last_episode || 1}`
+              const timeLeft = formatTimeLeft(item.watched_seconds, item.total_seconds)
+              const still = item.backdrop_path
+                ? backdropUrl(item.backdrop_path, 'w780')
+                : posterUrl(item.poster_path, 'w342')
               return (
                 <div
                   key={`${item.media_type}-${item.tmdb_id}`}
                   onClick={() => navigate(watchPath)}
-                  className="flex items-center gap-3 bg-dark-900 rounded-lg overflow-hidden cursor-pointer
-                             hover:bg-dark-800 transition-colors group"
+                  className="group shrink-0 w-64 cursor-pointer"
                 >
-                  <img
-                    src={posterUrl(item.poster_path, 'w92')}
-                    alt={item.title}
-                    className="w-16 h-20 object-cover shrink-0"
-                  />
-                  <div className="flex-1 min-w-0 pr-3 py-2">
-                    <h3 className="text-sm font-medium text-white truncate">{item.title}</h3>
-                    <p className="text-xs text-dark-400 mt-0.5">
-                      {item.media_type === 'tv'
-                        ? `S${item.last_season} E${item.last_episode}`
-                        : 'Movie'}
-                      {' · '}
-                      {formatTime(item.watched_seconds)} / {formatTime(item.total_seconds)}
-                    </p>
-                    <div className="progress-bar mt-2">
+                  <div className="relative aspect-video rounded-lg overflow-hidden bg-dark-900">
+                    {still ? (
+                      <img
+                        src={still}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Film size={28} className="text-dark-600" />
+                      </div>
+                    )}
+
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Play size={34} className="text-white drop-shadow-lg" fill="currentColor" />
+                    </div>
+
+                    {/* Forgets the resume position only — episodes already
+                        marked watched stay watched. */}
+                    <button
+                      onClick={(e) => handleRemoveFromContinue(e, item)}
+                      title="Remove from Continue Watching"
+                      aria-label={`Remove ${item.title} from Continue Watching`}
+                      className="absolute top-1.5 right-1.5 p-1 rounded-md bg-dark-950/80 text-dark-300
+                                 opacity-0 group-hover:opacity-100 focus:opacity-100
+                                 hover:text-white hover:bg-dark-700 transition-all"
+                    >
+                      <X size={13} />
+                    </button>
+
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/60">
                       <div
-                        className="progress-bar-fill"
+                        className="h-full bg-accent"
                         style={{
-                          width: `${(item.watched_seconds / Math.max(item.total_seconds, 1)) * 100}%`
+                          width: `${progressPercent(item.watched_seconds, item.total_seconds)}%`
                         }}
                       />
                     </div>
                   </div>
-                  <Play
-                    size={20}
-                    className="text-accent opacity-0 group-hover:opacity-100 transition-opacity mr-3"
-                    fill="currentColor"
-                  />
+
+                  <h3 className="mt-2 text-sm font-medium text-white truncate">{item.title}</h3>
+                  <p className="text-xs text-dark-400 mt-0.5 truncate">
+                    {item.media_type === 'tv'
+                      ? `S${item.last_season} E${item.last_episode}`
+                      : 'Movie'}
+                    {timeLeft && ` · ${timeLeft}`}
+                  </p>
                 </div>
               )
             })}

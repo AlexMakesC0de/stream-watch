@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Play,
@@ -24,6 +24,7 @@ import {
   profileUrl
 } from '@/services/tmdb'
 import { setSavedLocal } from '@/services/savedMedia'
+import { formatTimeLeft, progressPercent } from '@/lib/time'
 import type {
   TMDBMovie,
   TMDBTvShow,
@@ -149,14 +150,63 @@ export default function MediaDetailPage(): JSX.Element {
     navigate(`/movies/watch/tv/${tmdbId}/${season}/${episode}`)
   }
 
+  const getEpProgress = (season: number, ep: number): MediaEpisodeProgress | undefined =>
+    episodeProgress.find((pr) => pr.season_number === season && pr.episode_number === ep)
+
   const getEpStatus = (season: number, ep: number): 'completed' | 'in-progress' | 'unwatched' => {
-    const p = episodeProgress.find(
-      (pr) => pr.season_number === season && pr.episode_number === ep
-    )
+    const p = getEpProgress(season, ep)
     if (!p) return 'unwatched'
     if (p.completed) return 'completed'
     return 'in-progress'
   }
+
+  // Where the primary button should actually take you. Prefer the furthest
+  // episode left unfinished; otherwise the first unwatched episode of the
+  // season being browsed. Naming the target beats a bare "Continue Watching",
+  // which never said *what* it would resume.
+  const resumeTarget = useMemo(() => {
+    if (mediaType !== 'tv') return null
+
+    const unfinished = episodeProgress
+      .filter(
+        (p) =>
+          !p.completed &&
+          p.watched_seconds > 0 &&
+          p.season_number !== null &&
+          p.episode_number !== null
+      )
+      .sort(
+        (a, b) => b.season_number! - a.season_number! || b.episode_number! - a.episode_number!
+      )[0]
+
+    if (unfinished) {
+      return {
+        season: unfinished.season_number!,
+        episode: unfinished.episode_number!,
+        timeLeft: formatTimeLeft(unfinished.watched_seconds, unfinished.total_seconds),
+        resuming: true
+      }
+    }
+
+    const episodes = seasonDetail?.episodes
+    if (!episodes?.length) return null
+    const nextUp =
+      episodes.find((ep) => getEpStatus(selectedSeason, ep.episode_number) !== 'completed') ??
+      episodes[0]
+    return {
+      season: selectedSeason,
+      episode: nextUp.episode_number,
+      timeLeft: null,
+      resuming: false
+    }
+  }, [mediaType, episodeProgress, seasonDetail, selectedSeason])
+
+  // Movies store progress under season 0 / episode 0.
+  const movieProgress = getEpProgress(0, 0)
+  const movieTimeLeft =
+    mediaType === 'movie' && movieProgress && !movieProgress.completed
+      ? formatTimeLeft(movieProgress.watched_seconds, movieProgress.total_seconds)
+      : null
 
   if (loading) {
     return (
@@ -294,23 +344,20 @@ export default function MediaDetailPage(): JSX.Element {
               {mediaType === 'movie' && (
                 <button onClick={handleWatchMovie} className="btn-primary">
                   <Play size={16} fill="currentColor" />
-                  Watch Now
+                  {movieTimeLeft ? 'Resume' : 'Watch Now'}
                 </button>
               )}
-              {mediaType === 'tv' && seasonDetail?.episodes && seasonDetail.episodes.length > 0 && (
+              {mediaType === 'tv' && resumeTarget && (
                 <button
-                  onClick={() => {
-                    // Find next unwatched episode
-                    const nextEp = seasonDetail.episodes?.find(
-                      (ep) => getEpStatus(selectedSeason, ep.episode_number) !== 'completed'
-                    )
-                    const ep = nextEp || seasonDetail.episodes![0]
-                    handleWatchEpisode(selectedSeason, ep.episode_number)
-                  }}
+                  onClick={() => handleWatchEpisode(resumeTarget.season, resumeTarget.episode)}
                   className="btn-primary"
                 >
                   <Play size={16} fill="currentColor" />
-                  {episodeProgress.length > 0 ? 'Continue Watching' : 'Start Watching'}
+                  {resumeTarget.resuming
+                    ? `Resume S${resumeTarget.season} E${resumeTarget.episode}`
+                    : episodeProgress.length > 0
+                      ? `Play S${resumeTarget.season} E${resumeTarget.episode}`
+                      : 'Start Watching'}
                 </button>
               )}
               {trailer && (
@@ -318,6 +365,11 @@ export default function MediaDetailPage(): JSX.Element {
                   <Youtube size={16} />
                   Trailer
                 </button>
+              )}
+              {(resumeTarget?.timeLeft || movieTimeLeft) && (
+                <span className="text-sm text-dark-400">
+                  {resumeTarget?.timeLeft ?? movieTimeLeft}
+                </span>
               )}
             </div>
 
@@ -426,6 +478,11 @@ export default function MediaDetailPage(): JSX.Element {
               <div className="space-y-2">
                 {seasonDetail?.episodes?.map((ep) => {
                   const status = getEpStatus(selectedSeason, ep.episode_number)
+                  const prog = getEpProgress(selectedSeason, ep.episode_number)
+                  const pct = prog ? progressPercent(prog.watched_seconds, prog.total_seconds) : 0
+                  const epTimeLeft = prog
+                    ? formatTimeLeft(prog.watched_seconds, prog.total_seconds)
+                    : null
                   return (
                     <div
                       key={ep.id}
@@ -452,6 +509,13 @@ export default function MediaDetailPage(): JSX.Element {
                         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
                           <Play size={20} className="text-white" fill="currentColor" />
                         </div>
+                        {/* How far into this episode you got — otherwise a
+                            half-watched episode looks identical to a new one. */}
+                        {status === 'in-progress' && pct > 0 && (
+                          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/70">
+                            <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+                          </div>
+                        )}
                       </div>
 
                       {/* Info */}
@@ -473,6 +537,11 @@ export default function MediaDetailPage(): JSX.Element {
                       {/* Status */}
                       {status === 'completed' && (
                         <span className="text-accent text-xs font-medium shrink-0">Watched</span>
+                      )}
+                      {status === 'in-progress' && (
+                        <span className="text-dark-300 text-xs font-medium shrink-0">
+                          {epTimeLeft ?? 'In progress'}
+                        </span>
                       )}
                     </div>
                   )

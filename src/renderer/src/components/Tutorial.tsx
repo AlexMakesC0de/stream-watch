@@ -11,40 +11,40 @@ interface TutorialStep {
 
 const steps: TutorialStep[] = [
   {
-    title: 'Welcome to StreamWatch!',
+    title: 'Welcome to StreamWatch',
     description:
-      'This quick tour will show you around the app. It only takes a minute.',
-    icon: <Play size={28} className="text-accent" />
+      'Anime, films and series in one place, with your watch history kept on this machine. This takes about a minute.',
+    icon: <Play size={28} className="text-accent-light" />
   },
   {
-    title: 'Discover Anime',
+    title: 'Everything you started is on Home',
     description:
-      'The Home page shows trending and seasonal anime. Use the Discover tab in the sidebar or the search bar to find any anime by name.',
-    icon: <Compass size={28} className="text-accent" />
+      'Continue Watching sits under the hero and merges both catalogues, so a half-finished series and a half-finished film appear side by side with the time you have left.',
+    icon: <Compass size={28} className="text-accent-light" />
   },
   {
-    title: 'Search & Browse',
+    title: 'Browse from the top bar',
     description:
-      'Click "Search anime..." at the top of the sidebar or go to Discover. Type a title and hit Enter to search. Click any anime to see its details.',
-    icon: <Search size={28} className="text-accent" />
+      'Movies, Series and Anime each open a browse view. Narrow it by genre, year, rating or cast, and clear any filter from the chips below the controls.',
+    icon: <Search size={28} className="text-accent-light" />
   },
   {
-    title: 'Your Library',
+    title: 'My List holds your library',
     description:
-      'On any anime page, use the "Add to Library" button to organize it into Watching, Plan to Watch, Completed, On Hold, or Dropped. Access your library from the sidebar.',
-    icon: <BookOpen size={28} className="text-accent" />
+      'Save anything with the bookmark on its poster, then sort it into Watching, Plan to Watch, Completed, On Hold or Dropped from the title page.',
+    icon: <BookOpen size={28} className="text-accent-light" />
   },
   {
-    title: 'Watch Episodes',
+    title: 'Resuming picks up where you stopped',
     description:
-      'Click "Start Watching" on an anime page to begin. The player auto-saves your progress. Use the top bar to switch between SUB and DUB, navigate episodes, or open the episode list.',
-    icon: <Play size={28} className="text-accent" />
+      'The play button on a title page names the exact episode it will resume and how long is left. Progress saves as you watch.',
+    icon: <Play size={28} className="text-accent-light" />
   },
   {
-    title: 'Episode Completion',
+    title: 'Episodes never skip on their own',
     description:
-      'Episodes are automatically marked as watched when you reach ~85% of the video. However, this isn\'t always perfect — you can always right-click any episode (on the anime page or in the player sidebar) to manually toggle it as watched or unwatched.',
-    icon: <MousePointerClick size={28} className="text-accent" />
+      'Films and series play through third-party sources, so StreamWatch will not advance an episode for you — it marks one watched when it ends, and you choose the next with Next or the episode list.',
+    icon: <MousePointerClick size={28} className="text-accent-light" />
   }
 ]
 
