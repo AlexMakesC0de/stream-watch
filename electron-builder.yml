@@ -30,4 +30,4 @@ npmRebuild: true
 publish:
   provider: github
   owner: AlexMakesC0de
-  repo: anime-watch
+  repo: stream-watch
